@@ -5,14 +5,6 @@
  */
 
 import { useCallback, useEffect, useReducer } from 'react'
-import { appReducer, initialState } from './state/app-state'
-import { ConnectingView } from './views/ConnectingView'
-import { DisconnectedView } from './views/DisconnectedView'
-import { IdleView } from './views/IdleView'
-import { PairingErrorView } from './views/PairingErrorView'
-import { PairingView } from './views/PairingView'
-import { PermissionModeView } from './views/PermissionModeView'
-import { PromptChoiceView } from './views/PromptChoiceView'
 import type {
   ModeToggleAckPayload,
   PairingAckPayload,
@@ -22,6 +14,14 @@ import type {
 import type { InquiryPushPayload } from './lib/protocol'
 import { wsClient } from './lib/ws-client'
 import type { WsStatus } from './lib/ws-client'
+import { appReducer, initialState } from './state/app-state'
+import { ConnectingView } from './views/ConnectingView'
+import { DisconnectedView } from './views/DisconnectedView'
+import { IdleView } from './views/IdleView'
+import { PairingErrorView } from './views/PairingErrorView'
+import { PairingView } from './views/PairingView'
+import { PermissionModeView } from './views/PermissionModeView'
+import { PromptChoiceView } from './views/PromptChoiceView'
 
 export function App() {
   const [state, dispatch] = useReducer(appReducer, initialState)
@@ -31,6 +31,10 @@ export function App() {
     switch (status) {
       case 'reconnecting':
         dispatch({ type: 'WS_RECONNECTING', attempt: wsClient.getReconnectAttempt() })
+        break
+      // IG3: dispatch WS_DISCONNECTED on server-shutdown (4003)
+      case 'disconnected':
+        dispatch({ type: 'WS_DISCONNECTED' })
         break
       case 'pairing-error':
         dispatch({ type: 'WS_TIMEOUT' })
@@ -90,7 +94,8 @@ export function App() {
   }
 
   function handleReconnect() {
-    // Go back to pairing — user re-enters token
+    // IG3: disconnect ws before resetting (mirror handleRepair symmetry)
+    wsClient.disconnect()
     dispatch({ type: 'RESET_TO_PAIRING' })
   }
 
@@ -119,16 +124,9 @@ export function App() {
 
   return (
     <div className="app-container">
-      {page === 'pairing' && (
-        <PairingView
-          onConnect={handleConnect}
-          loading={false}
-        />
-      )}
+      {page === 'pairing' && <PairingView onConnect={handleConnect} loading={false} />}
 
-      {page === 'connecting' && (
-        <ConnectingView />
-      )}
+      {page === 'connecting' && <ConnectingView />}
 
       {page === 'idle' && (
         <IdleView
@@ -156,17 +154,11 @@ export function App() {
       )}
 
       {page === 'disconnected' && (
-        <DisconnectedView
-          attempt={state.reconnectAttempt}
-          onReconnect={handleReconnect}
-        />
+        <DisconnectedView attempt={state.reconnectAttempt} onReconnect={handleReconnect} />
       )}
 
       {page === 'pairing-error' && (
-        <PairingErrorView
-          reason={state.pairingErrorReason}
-          onRepair={handleRepair}
-        />
+        <PairingErrorView reason={state.pairingErrorReason} onRepair={handleRepair} />
       )}
     </div>
   )
