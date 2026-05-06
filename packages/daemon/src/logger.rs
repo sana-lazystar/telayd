@@ -27,8 +27,10 @@ pub fn init_logging(log_dir: &std::path::Path) -> Result<WorkerGuard> {
     std::fs::create_dir_all(log_dir)
         .with_context(|| format!("create log dir {log_dir:?}"))?;
 
-    // Daily rolling file appender → daemon-YYYY-MM-DD.log
-    let file_appender = tracing_appender::rolling::daily(log_dir, "daemon");
+    // Daily rolling file appender → telayd-YYYY-MM-DD.log
+    // IG10 fix: deployment-plan.md specifies `telayd-YYYYMMDD.log` as the canonical
+    // log filename; implementation was drifted to `daemon-<DATE>`.  Plan stays SSOT.
+    let file_appender = tracing_appender::rolling::daily(log_dir, "telayd");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     // ENV-filter: RUST_LOG or TELAYD_LOG_LEVEL, default INFO.

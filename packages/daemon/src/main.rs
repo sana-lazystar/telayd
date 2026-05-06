@@ -263,14 +263,15 @@ fn cmd_stop() -> Result<()> {
 fn cmd_logs(lines: u32) -> Result<()> {
     let log_path = paths::daemon_log()?;
 
-    // Scan from the config dir for the most-recent daemon-*.log file.
+    // Scan from the config dir for the most-recent telayd-*.log file.
+    // IG10 fix: deployment-plan uses `telayd-YYYYMMDD.log`; glob updated to match.
     let config_dir = paths::config_dir()?;
     let mut log_files: Vec<_> = std::fs::read_dir(&config_dir)?
         .filter_map(|e| e.ok())
         .filter(|e| {
             e.file_name()
                 .to_string_lossy()
-                .starts_with("daemon-")
+                .starts_with("telayd-")
         })
         .collect();
     log_files.sort_by_key(|e| e.file_name());
