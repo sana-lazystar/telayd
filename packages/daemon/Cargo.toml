@@ -1,0 +1,90 @@
+[package]
+name = "telayd-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "telayd"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# WebSocket server
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.5", features = ["trace"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = { version = "0.8", features = ["preserve_order"] }
+
+# Crypto / token
+getrandom = "0.2"
+base64 = "0.22"
+subtle = "2"
+
+# XDG paths
+directories = "5"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+
+# UUID
+uuid = { version = "1", features = ["v4"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async channel / task
+tokio-util = { version = "0.7", features = ["io", "sync"] }
+futures = "0.3"
+
+# HTTP client (for cloudflared download)
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+
+# Sha2 for cloudflared verify
+sha2 = "0.10"
+hex = "0.4"
+
+# Bytes (axum ws Ping payload)
+bytes = "1"
+
+# File operations
+tempfile = "3"
+
+# Unix IPC
+tokio-stream = "0.1"
+
+# Archive extraction (cloudflared install)
+flate2 = "1"
+tar = "0.4"
+
+# Process signal (SIGTERM/SIGKILL for cloudflared)
+nix = { version = "0.29", features = ["signal", "process"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["full", "test-util"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Allow common patterns that clippy pedantic dislikes
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
