@@ -29,8 +29,12 @@ done
 SOCK="${HOME}/.config/telayd/daemon.sock"
 
 # ── Daemon-absent guard ───────────────────────────────────────────────────────
-# If the socket file doesn't exist, the daemon is down.  Exit 0 immediately.
-if [ ! -S "${SOCK}" ]; then
+# If the socket file doesn't exist, or is a symlink (symlink-redirect attack),
+# the daemon is down or the path is tampered with.  Exit 0 immediately.
+# (IG6 fix: diagnosis.md §Group6 symlink reject)
+# NOTE: [ -L ] tests for symlink before [ ! -S ] so we reject symlinks even
+# if they point to a valid socket (macOS bash 3.2 compat: -L is POSIX 1003.2).
+if [ -L "${SOCK}" ] || [ ! -S "${SOCK}" ]; then
   exit 0
 fi
 
