@@ -162,6 +162,52 @@ impl TmuxController {
         }
     }
 
+    /// Sends a `/mode <name>` command to Claude Code running in a tmux session.
+    ///
+    /// IG6 fix: `apply_permission_mode` in `ws_bridge.rs` MUST call this method
+    /// instead of `tokio::process::Command::new("tmux")` directly, so that the
+    /// session whitelist check applies (prevents arbitrary session injection).
+    ///
+    /// Returns `true` if the command was sent successfully, `false` if the session
+    /// is not in the whitelist or the tmux call fails.
+    pub async fn send_mode_command(
+        &self,
+        session: &str,
+        mode: &crate::protocol::PermissionMode,
+    ) -> bool {
+        // Security: validate session against active_sessions whitelist.
+        {
+            let set = self.active_sessions.lock().expect("lock active_sessions");
+            if !set.contains(session) {
+                warn!(
+                    target: "tmux",
+                    session,
+                    "send_mode_command rejected — session not in active whitelist"
+                );
+                return false;
+            }
+        }
+        let mode_cmd = format!("/mode {}", mode.as_str());
+        let status = Command::new("tmux")
+            .args(["send-keys", "-t", session, "-l", &mode_cmd])
+            .status()
+            .await;
+        match status {
+            Ok(s) if s.success() => {
+                info!(target: "tmux", session, mode = ?mode, "mode command sent");
+                true
+            }
+            Ok(s) => {
+                warn!(target: "tmux", session, ?s, "send_mode_command failed (non-zero exit)");
+                false
+            }
+            Err(e) => {
+                warn!(target: "tmux", session, err = %e, "send_mode_command failed");
+                false
+            }
+        }
+    }
+
     /// Reads `sentinel_parser` — unused in L0 but DI is wired.
     pub fn sentinel_parser(&self) -> &Arc<dyn crate::sentinel::SentinelParser> {
         &self.sentinel_parser
