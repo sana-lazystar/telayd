@@ -8,6 +8,15 @@
     <meta name="theme-color" content="#0d1117" />
     <meta name="color-scheme" content="dark" />
 
+    <!-- IG9: Security headers via meta (HTTP-header CSP deferred to L1+ hosting)
+         Note: frame-ancestors cannot be set via meta — requires HTTP header (L1 hosting decision).
+         Permissions-Policy: push notification excluded per project-rule L0 out-of-scope. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss://*.trycloudflare.com ws://localhost:7777; object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
+    <meta name="referrer" content="no-referrer" />
+
     <!-- PWA -->
     <link rel="manifest" href="/manifest.webmanifest" />
 

@@ -7,20 +7,13 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.svg'],
       manifest: false, // manifest is in public/manifest.webmanifest
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/.+\.trycloudflare\.com\//,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              networkTimeoutSeconds: 10,
-            },
-          },
-        ],
+        globPatterns: ['**/*.{js,css,html,svg,webmanifest}'],
+        // IG8: remove trycloudflare.com runtimeCaching — WS-only, no GET cache needed.
+        // Caching WS-upgrade responses is harmful and causes stale-cache hits on URL rotation.
+        runtimeCaching: [],
       },
     }),
   ],
@@ -31,6 +24,8 @@ export default defineConfig({
   build: {
     target: 'es2020',
     outDir: 'dist',
-    sourcemap: true,
+    // IG8: hidden sourcemap for production — avoids exposing full source tree via CF tunnel.
+    // Use 'inline' in dev via vite server (already default for dev mode).
+    sourcemap: 'hidden',
   },
 })
