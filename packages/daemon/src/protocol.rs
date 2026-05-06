@@ -67,9 +67,21 @@ pub struct PairingAck {
     pub server_version: String,
 }
 
+/// Typed reason for a pairing rejection (IG1: replaces `String` reason field).
+/// Serialises as kebab-case on the wire per architecture.md §2.3.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PairingRejectReason {
+    TokenMismatch,
+    Expired,
+    BadEnvelope,
+    BadPayload,
+    UnsupportedVersion,
+}
+
 #[derive(Debug, Serialize)]
 pub struct PairingReject {
-    pub reason: String,
+    pub reason: PairingRejectReason,
 }
 
 // ── Inquiry ──────────────────────────────────────────────────────────────────
@@ -94,6 +106,10 @@ pub struct Inquiry {
 pub struct InquiryQuestion {
     pub question: String,
     pub options: Vec<InquiryOption>,
+    /// Serialised as `multiSelect` on the wire (architecture.md §3.3 + telayd-protocol §3.2).
+    /// Do NOT rename ipc::HookQuestion::multi_select — that consumes the Claude Code hook payload
+    /// which uses `multiSelect` key as well (IG1 fix: diagnosis.md §Group1).
+    #[serde(rename = "multiSelect")]
     pub multi_select: bool,
 }
 
@@ -153,10 +169,21 @@ pub struct InquiryAck {
     pub latency_ms: u64,
 }
 
+/// Typed reason for an inquiry error (IG1: replaces magic-string `reason`).
+/// Serialises as kebab-case on the wire per architecture.md §2.3.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum InquiryErrorReason {
+    DialogNotReady,
+    SendKeysFailed,
+    InquiryStale,
+    Validation,
+}
+
 #[derive(Debug, Serialize)]
 pub struct InquiryError {
     pub tool_use_id: String,
-    pub reason: String,
+    pub reason: InquiryErrorReason,
 }
 
 // ── Mode Toggle ───────────────────────────────────────────────────────────────
