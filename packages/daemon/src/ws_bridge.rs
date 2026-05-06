@@ -29,8 +29,9 @@ use uuid::Uuid;
 
 use crate::metrics::{LatencyTimer, MetricsCollector};
 use crate::protocol::{
-    build_frame, Envelope, Inquiry, InquiryAck, InquiryError, InquiryResponse,
-    ModeToggleAck, ModeToggleRequest, PairingAck, PairingReject, PermissionMode,
+    build_frame, Envelope, Inquiry, InquiryAck, InquiryError, InquiryErrorReason,
+    InquiryResponse, ModeToggleAck, ModeToggleRequest, PairingAck, PairingReject,
+    PairingRejectReason, PermissionMode,
 };
 use crate::tmux_controller::TmuxController;
 
@@ -45,11 +46,23 @@ const TARPIT_DURATION: Duration = Duration::from_secs(60);
 
 // ── Shared daemon state ──────────────────────────────────────────────────────
 
+/// Per-session active client slot.
+///
+/// IG2 fix: includes an eviction sender so the eviction site can signal
+/// the per-connection task to send Close(4002) on its own socket.
+struct ActiveClient {
+    /// Outbound frame sender (daemon → PWA).
+    out_tx: mpsc::Sender<String>,
+    /// One-shot eviction signal: sending triggers Close(4002) in the task.
+    evict_tx: tokio::sync::oneshot::Sender<()>,
+}
+
 /// Shared state injected into every axum handler.
 pub struct WsBridgeState {
     pub pairing_token: String,
     /// The currently connected and authenticated client (None when idle).
-    pub active_client: Mutex<Option<mpsc::Sender<String>>>,
+    /// IG2 fix: stores ActiveClient (out_tx + evict_tx) instead of bare Sender.
+    active_client: Mutex<Option<ActiveClient>>,
     /// Pending inquiries: tool_use_id → (Inquiry, Instant start time).
     pub pending_inquiries: RwLock<HashMap<String, (Inquiry, Instant)>>,
     /// Brute-force rate limiter: IP → (failure_count, first_fail_at).
@@ -114,14 +127,14 @@ pub async fn run_ws_bridge(
 /// Forwards an `Inquiry` to the connected PWA client (if any).
 pub async fn push_inquiry(state: &Arc<WsBridgeState>, inquiry: Inquiry) -> Result<()> {
     let client = state.active_client.lock().await;
-    if let Some(tx) = &*client {
+    if let Some(ac) = &*client {
         // Register in pending map.
         {
             let mut pending = state.pending_inquiries.write().await;
             pending.insert(inquiry.tool_use_id.clone(), (inquiry.clone(), Instant::now()));
         }
         let frame = build_frame("inquiry-push", &inquiry.tool_use_id, &inquiry)?;
-        tx.send(frame).await.map_err(|_| anyhow::anyhow!("client channel closed"))?;
+        ac.out_tx.send(frame).await.map_err(|_| anyhow::anyhow!("client channel closed"))?;
     } else {
         warn!(
             target: "ws_bridge",
@@ -189,10 +202,14 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
     }
 
     // Parse envelope.
+    // IG1 fix: emit pairing-reject frame on ALL 4001 paths (not just token-mismatch).
+    // IG2 fix: pairing-reject frames now use PairingRejectReason typed enum.
     let env: Envelope = match serde_json::from_str(&raw) {
         Ok(e) => e,
         Err(_) => {
             record_auth_failure(&state, &ip).await;
+            // Emit reject frame — correlation id unknown, use placeholder.
+            let _ = send_pairing_reject(&mut socket, "unknown", PairingRejectReason::BadEnvelope).await;
             let _ = socket
                 .send(Message::Close(Some(AxumCloseFrame {
                     code: 4001,
@@ -205,10 +222,11 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
 
     if env.v != 1 {
         record_auth_failure(&state, &ip).await;
+        let _ = send_pairing_reject(&mut socket, &env.id, PairingRejectReason::UnsupportedVersion).await;
         let _ = socket
             .send(Message::Close(Some(AxumCloseFrame {
                 code: 4001,
-                reason: "unsupported version".into(),
+                reason: "unsupported-version".into(),
             })))
             .await;
         return;
@@ -216,6 +234,7 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
 
     if env.msg_type != "pairing-request" {
         record_auth_failure(&state, &ip).await;
+        let _ = send_pairing_reject(&mut socket, &env.id, PairingRejectReason::BadEnvelope).await;
         let _ = socket
             .send(Message::Close(Some(AxumCloseFrame {
                 code: 4001,
@@ -225,10 +244,11 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
         return;
     }
 
-    let req: crate::protocol::PairingRequest = match serde_json::from_value(env.payload) {
+    let req: crate::protocol::PairingRequest = match serde_json::from_value(env.payload.clone()) {
         Ok(r) => r,
         Err(_) => {
             record_auth_failure(&state, &ip).await;
+            let _ = send_pairing_reject(&mut socket, &env.id, PairingRejectReason::BadPayload).await;
             let _ = socket
                 .send(Message::Close(Some(AxumCloseFrame {
                     code: 4001,
@@ -242,6 +262,7 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
     // Token format validation (never leak timing on format-invalid tokens).
     if !crate::pairing::is_valid_token_format(&req.token) {
         record_auth_failure(&state, &ip).await;
+        let _ = send_pairing_reject(&mut socket, &env.id, PairingRejectReason::TokenMismatch).await;
         let _ = socket
             .send(Message::Close(Some(AxumCloseFrame {
                 code: 4001,
@@ -253,6 +274,7 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
 
     // Check tarpit again (may have been updated by other calls).
     if is_tarpitted(&state, &ip).await {
+        let _ = send_pairing_reject(&mut socket, &env.id, PairingRejectReason::TokenMismatch).await;
         let _ = socket
             .send(Message::Close(Some(AxumCloseFrame {
                 code: 4001,
@@ -268,15 +290,7 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
         record_auth_failure(&state, &ip).await;
 
         // Send pairing-reject before closing (api-spec §pairing-reject).
-        if let Ok(reject_frame) = build_frame(
-            "pairing-reject",
-            &env.id,
-            &PairingReject {
-                reason: "token-mismatch".to_string(),
-            },
-        ) {
-            let _ = socket.send(Message::Text(reject_frame.into())).await;
-        }
+        let _ = send_pairing_reject(&mut socket, &env.id, PairingRejectReason::TokenMismatch).await;
         let _ = socket
             .send(Message::Close(Some(AxumCloseFrame {
                 code: 4001,
@@ -287,12 +301,14 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
     }
 
     // ── Evict existing client (1-client limit) ──────────────────────────────
+    // IG2 fix: fire evict_tx so the old task sends Close(4002,"replaced") on its own socket.
     {
         let mut active = state.active_client.lock().await;
-        if active.is_some() {
+        if let Some(old) = active.take() {
             info!(target: "ws_bridge", %ip, "evicting existing client (close 4002)");
-            // Drop the old sender — this closes the outbound channel for the old task.
-            *active = None;
+            // Sending on evict_tx signals the old event loop to emit Close(4002).
+            // If it's already gone, the error is harmless.
+            let _ = old.evict_tx.send(());
         }
     }
 
@@ -313,20 +329,35 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
 
     info!(target: "auth", remote_ip = %ip, session = %session_id, "pairing successful");
 
-    // ── Outbound channel (daemon → client) ───────────────────────────────────
+    // ── Outbound channel + per-session eviction channel ──────────────────────
+    // IG2 fix: per-task oneshot eviction channel; eviction site fires evict_tx.
     let (out_tx, mut out_rx) = mpsc::channel::<String>(64);
+    let (evict_tx, mut evict_rx) = tokio::sync::oneshot::channel::<()>();
     {
         let mut active = state.active_client.lock().await;
-        *active = Some(out_tx);
+        *active = Some(ActiveClient { out_tx, evict_tx });
     }
 
     // ── Event loop ─────────────────────────────────────────────────────────
     let mut missed_pings: u32 = 0;
     let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
     let mut heartbeat_timer: Option<tokio::time::Instant> = None;
+    // Tracks whether this task was evicted (determines close code on exit).
+    let mut evicted = false;
 
     loop {
         tokio::select! {
+            // Eviction signal from a new connecting client (IG2 fix).
+            _ = &mut evict_rx => {
+                info!(target: "ws_bridge", %ip, "evicted by new client — sending close 4002");
+                let _ = socket.send(Message::Close(Some(AxumCloseFrame {
+                    code: 4002,
+                    reason: "replaced".into(),
+                }))).await;
+                evicted = true;
+                break;
+            }
+
             // Outbound frame from daemon.
             Some(frame) = out_rx.recv() => {
                 if socket.send(Message::Text(frame.into())).await.is_err() {
@@ -389,10 +420,12 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
         }
     }
 
-    // Clean up active client slot.
-    let mut active = state.active_client.lock().await;
-    if active.is_some() {
-        *active = None;
+    // Clean up active client slot (only if not already replaced by the new client).
+    if !evicted {
+        let mut active = state.active_client.lock().await;
+        if active.is_some() {
+            *active = None;
+        }
     }
     info!(target: "ws_bridge", %ip, "connection closed");
 }
@@ -430,16 +463,54 @@ async fn handle_inbound(
 }
 
 async fn handle_inquiry_response(env: Envelope, state: &Arc<WsBridgeState>) -> Result<()> {
-    let resp: InquiryResponse = serde_json::from_value(env.payload)
-        .map_err(|e| anyhow::anyhow!("inquiry-response parse: {e}"))?;
+    // IG1 fix: parse payload; on failure emit inquiry-error{validation} before returning.
+    let resp: InquiryResponse = match serde_json::from_value(env.payload) {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(target: "ws_bridge", err = %e, "inquiry-response parse failed");
+            // tool_use_id may be the correlation id from the envelope.
+            let tool_use_id = env.id.clone();
+            let err_frame = build_frame(
+                "inquiry-error",
+                &tool_use_id,
+                &InquiryError {
+                    tool_use_id: tool_use_id.clone(),
+                    reason: InquiryErrorReason::Validation,
+                },
+            )?;
+            if let Some(ac) = &*state.active_client.lock().await {
+                let _ = ac.out_tx.send(err_frame).await;
+            }
+            anyhow::bail!("inquiry-response parse: {e}");
+        }
+    };
 
     // Look up pending inquiry to get options_total.
+    // IG1 fix: emit inquiry-error{inquiry-stale} before returning.
     let (inquiry, start_time) = {
         let pending = state.pending_inquiries.read().await;
-        pending
-            .get(&resp.tool_use_id)
-            .cloned()
-            .ok_or_else(|| anyhow::anyhow!("inquiry-stale: {}", resp.tool_use_id))?
+        match pending.get(&resp.tool_use_id).cloned() {
+            Some(entry) => entry,
+            None => {
+                warn!(
+                    target: "ws_bridge",
+                    tool_use_id = %resp.tool_use_id,
+                    "inquiry-stale"
+                );
+                let err_frame = build_frame(
+                    "inquiry-error",
+                    &resp.tool_use_id,
+                    &InquiryError {
+                        tool_use_id: resp.tool_use_id.clone(),
+                        reason: InquiryErrorReason::InquiryStale,
+                    },
+                )?;
+                if let Some(ac) = &*state.active_client.lock().await {
+                    let _ = ac.out_tx.send(err_frame).await;
+                }
+                anyhow::bail!("inquiry-stale: {}", resp.tool_use_id);
+            }
+        }
     };
 
     let options_total = inquiry
@@ -448,7 +519,27 @@ async fn handle_inquiry_response(env: Envelope, state: &Arc<WsBridgeState>) -> R
         .map(|q| q.options.len() as u32)
         .unwrap_or(1);
 
-    resp.validate(options_total)?;
+    // IG1 fix: emit inquiry-error{validation} on validate failure.
+    if let Err(e) = resp.validate(options_total) {
+        warn!(
+            target: "ws_bridge",
+            tool_use_id = %resp.tool_use_id,
+            err = %e,
+            "inquiry-response validation failed"
+        );
+        let err_frame = build_frame(
+            "inquiry-error",
+            &resp.tool_use_id,
+            &InquiryError {
+                tool_use_id: resp.tool_use_id.clone(),
+                reason: InquiryErrorReason::Validation,
+            },
+        )?;
+        if let Some(ac) = &*state.active_client.lock().await {
+            let _ = ac.out_tx.send(err_frame).await;
+        }
+        return Err(e);
+    }
 
     let timer = LatencyTimer::start();
 
@@ -467,8 +558,8 @@ async fn handle_inquiry_response(env: Envelope, state: &Arc<WsBridgeState>) -> R
                     latency_ms,
                 },
             )?;
-            if let Some(tx) = &*state.active_client.lock().await {
-                let _ = tx.send(ack).await;
+            if let Some(ac) = &*state.active_client.lock().await {
+                let _ = ac.out_tx.send(ack).await;
             }
             let mut pending = state.pending_inquiries.write().await;
             pending.remove(&resp.tool_use_id);
@@ -517,16 +608,19 @@ async fn handle_inquiry_response(env: Envelope, state: &Arc<WsBridgeState>) -> R
                     latency_ms,
                 },
             )?;
-            if let Some(tx) = &*client {
-                let _ = tx.send(ack).await;
+            if let Some(ac) = &*client {
+                let _ = ac.out_tx.send(ack).await;
             }
+            // IG11 fix: structured log shape matching test-strategy §3.1 SSOT.
             info!(
-                target: "ws_bridge",
+                target: "metrics",
+                event = "inject",
                 tool_use_id = %resp.tool_use_id,
                 latency_ms,
                 "inject success"
             );
         }
+        // IG1 fix: inject failure emits inquiry-error{send-keys-failed} (typed enum).
         Err(e) => {
             warn!(
                 target: "ws_bridge",
@@ -539,11 +633,11 @@ async fn handle_inquiry_response(env: Envelope, state: &Arc<WsBridgeState>) -> R
                 &resp.tool_use_id,
                 &InquiryError {
                     tool_use_id: resp.tool_use_id.clone(),
-                    reason: "send-keys-failed".to_string(),
+                    reason: InquiryErrorReason::SendKeysFailed,
                 },
             )?;
-            if let Some(tx) = &*client {
-                let _ = tx.send(err_frame).await;
+            if let Some(ac) = &*client {
+                let _ = ac.out_tx.send(err_frame).await;
             }
         }
     }
@@ -556,8 +650,9 @@ async fn handle_mode_toggle(env: Envelope, state: &Arc<WsBridgeState>) -> Result
 
     info!(target: "ws_bridge", mode = ?req.mode, "mode-toggle-request");
 
-    // Apply mode change via tmux send-keys to Claude Code.
-    // L0: best-effort, always report applied=true.
+    // Apply mode change via TmuxController (IG6 fix: not direct Command::new("tmux")).
+    // IG10 fix: `apply_permission_mode` returns `false` when no session is known —
+    // the ack will have `applied: false`, which is the correct semantics.
     let applied = apply_permission_mode(&req.mode, state).await;
 
     {
@@ -575,8 +670,8 @@ async fn handle_mode_toggle(env: Envelope, state: &Arc<WsBridgeState>) -> Result
     )?;
 
     let client = state.active_client.lock().await;
-    if let Some(tx) = &*client {
-        let _ = tx.send(ack).await;
+    if let Some(ac) = &*client {
+        let _ = ac.out_tx.send(ack).await;
     }
     Ok(())
 }
@@ -585,30 +680,40 @@ async fn handle_mode_toggle(env: Envelope, state: &Arc<WsBridgeState>) -> Result
 ///
 /// Claude Code accepts `/mode plan`, `/mode accept-edits`, `/mode default`
 /// (Anthropic #35637 wedge).
+///
+/// IG6 fix: routes through `TmuxController::send_mode_command` which validates
+/// the session against the active whitelist — no direct `Command::new("tmux")`.
 async fn apply_permission_mode(mode: &PermissionMode, state: &Arc<WsBridgeState>) -> bool {
-    // Get current active tmux sessions from the controller.
-    // L0: attempt on all registered sessions.
-    let mode_cmd = format!("/mode {}", mode.as_str());
-
-    // We need a session to send to; use the first pending inquiry's session
-    // or skip if none known.
+    // Use the first pending inquiry's session as the target.
+    // L0: single-session assumption — use whichever session is known.
     let session = {
         let pending = state.pending_inquiries.read().await;
         pending.values().next().map(|(inq, _)| inq.tmux_session.clone())
     };
 
     if let Some(sess) = session {
-        tokio::process::Command::new("tmux")
-            .args(["send-keys", "-t", &sess, "-l", &mode_cmd])
-            .status()
-            .await
-            .ok()
-            .and_then(|s| if s.success() { Some(()) } else { None })
-            .is_some()
+        state.tmux.send_mode_command(&sess, mode).await
     } else {
-        // No active session — report not applied but don't error.
+        // No active session known — mode toggle cannot be applied.
+        // Returns false; caller sends mode-toggle-ack{applied:false}.
         false
     }
+}
+
+// ── Helper: send pairing-reject frame ────────────────────────────────────────
+
+/// Sends a `pairing-reject` frame on the socket.
+///
+/// IG1/IG2 fix: every 4001 close path emits a typed-reason reject frame
+/// before the Close frame so the PWA can display the correct error message.
+async fn send_pairing_reject(
+    socket: &mut WebSocket,
+    correlation_id: &str,
+    reason: PairingRejectReason,
+) -> Result<()> {
+    let frame = build_frame("pairing-reject", correlation_id, &PairingReject { reason })?;
+    socket.send(Message::Text(frame.into())).await?;
+    Ok(())
 }
 
 // ── Rate limiter ──────────────────────────────────────────────────────────────
