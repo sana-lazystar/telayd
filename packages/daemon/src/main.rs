@@ -179,8 +179,9 @@ async fn cmd_start() -> Result<()> {
     // Spawn cloudflared tunnel.
     let cf_cancel = cancellation.clone();
     let token_for_cf = cfg.pairing_token.clone();
-    let mut config_for_tunnel = cfg.clone();
+    let config_for_tunnel = cfg.clone();
     let tunnel_handle = tokio::spawn(async move {
+        let mut config_for_tunnel = config_for_tunnel;
         cf_tunnel::run_tunnel(cf_cancel, token_for_cf, move |url| {
             info!(target: "cli", "tunnel URL: {}", &url[..url.len().min(40)]);
             config_for_tunnel.last_tunnel_url = Some(url);

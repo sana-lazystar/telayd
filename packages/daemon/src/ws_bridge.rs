@@ -413,7 +413,7 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
                     }
                 }
                 heartbeat_timer = Some(tokio::time::Instant::now());
-                if socket.send(Message::Ping(bytes::Bytes::new())).await.is_err() {
+                if socket.send(Message::Ping(vec![])).await.is_err() {
                     break;
                 }
             }

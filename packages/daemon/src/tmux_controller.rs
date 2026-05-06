@@ -45,7 +45,8 @@ pub static INJECT_RACE_TOTAL: AtomicU64 = AtomicU64::new(0);
 ///
 /// Only sessions registered here can be driven — arbitrary session
 /// names from user input are rejected.
-#[derive(Default)]
+// #[allow(clippy::manual_default)]: `Arc<dyn SentinelParser>` does not implement Default;
+// use `TmuxController::new(parser)` instead.
 pub struct TmuxController {
     /// Set of active tmux session names (daemon-owned).
     active_sessions: std::sync::Mutex<std::collections::HashSet<String>>,

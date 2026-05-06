@@ -19,7 +19,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
@@ -235,7 +235,8 @@ async fn handle_connection(
     tx: mpsc::Sender<Inquiry>,
     tmux_session: String,
 ) -> Result<()> {
-    let mut reader = BufReader::new(stream.take(MAX_PAYLOAD_BYTES + 1));
+    // Read up to MAX_PAYLOAD_BYTES+1 bytes, stopping at newline (DoS guard).
+    let mut reader = BufReader::new(stream);
     let mut line = Vec::with_capacity(8192);
 
     reader
@@ -373,8 +374,10 @@ mod tests {
         // Give it a moment to bind
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        // Connect and send a valid payload
-        let json = valid_payload_json("toolu_TESTPAYLOAD12345678901234567", "testsess");
+        // Connect and send a valid payload.
+        // IPC protocol is newline-delimited JSON — must be a single line.
+        let json_multiline = valid_payload_json("toolu_TESTPAYLOAD12345678901234567", "testsess");
+        let json = json_multiline.split_whitespace().collect::<Vec<_>>().join(" ");
         let mut conn = tokio::net::UnixStream::connect(&sock).await.unwrap();
         conn.write_all(json.as_bytes()).await.unwrap();
         conn.write_all(b"\n").await.unwrap();

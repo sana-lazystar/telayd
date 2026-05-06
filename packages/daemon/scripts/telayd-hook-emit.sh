@@ -15,6 +15,7 @@
 #
 # Works on macOS bash 3.2 (POSIX-compatible, no bashisms beyond 3.2).
 # shellcheck disable=SC2064
+# shellcheck disable=SC2329  # cleanup() is called via `trap ... EXIT` (indirect call)
 
 set -euo pipefail
 

@@ -218,7 +218,7 @@ pub async fn run_tunnel<F>(
     on_url: F,
 ) -> Result<()>
 where
-    F: Fn(String) + Send + 'static,
+    F: FnMut(String) + Send + 'static,
 {
     let bin = cloudflared_bin()?;
 
@@ -242,7 +242,8 @@ where
     let stdout = child.stdout.take().context("no stdout")?;
 
     let token = pairing_token.clone();
-    let on_url = Arc::new(on_url);
+    // Wrap FnMut in Arc<Mutex> so both stderr and stdout tasks can call it.
+    let on_url = Arc::new(std::sync::Mutex::new(on_url));
     let on_url2 = on_url.clone();
 
     // Read stderr for URL.
@@ -257,7 +258,7 @@ where
                     "tunnel URL captured"
                 );
                 fire_notification(&url, &token);
-                on_url(url);
+                if let Ok(mut cb) = on_url.lock() { cb(url); }
             }
         }
     });
@@ -268,7 +269,7 @@ where
         while let Ok(Some(line)) = reader.next_line().await {
             if let Some(url) = extract_tunnel_url(&line) {
                 info!(target: "cf_tunnel", event = "url_rotation_stdout", "URL on stdout");
-                on_url2(url);
+                if let Ok(mut cb) = on_url2.lock() { cb(url); }
             }
         }
     });
@@ -368,22 +369,11 @@ mod tests {
     fn sha256_verifier_matches() {
         let data = b"hello world";
         let hash = sha256_bytes(data);
-        // Known SHA256 of "hello world"
-        assert_eq!(
-            hash,
-            "b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576e359c25cc10e2f98"
-                .trim_end_matches('\n')
-        );
-        // More precisely:
-        let expected = "b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576e359c25cc10e2f98";
-        // Note: actual SHA256("hello world") is:
-        // b94d27b9934d3e08a52e52d7da7dabfac484efe04294e576e359c25cc10e2f98 — 63 chars
-        // Let's use a known-good value:
+        // Cross-check against sha2 crate directly (authoritative).
         let mut hasher = Sha256::new();
         hasher.update(b"hello world");
         let correct = hex::encode(hasher.finalize());
         assert_eq!(hash, correct);
-        let _ = expected; // suppress warning
     }
 
     #[test]
