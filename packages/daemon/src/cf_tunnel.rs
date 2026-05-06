@@ -88,8 +88,10 @@ async fn install_cloudflared() -> Result<PathBuf> {
     let bin = cloudflared_bin()?;
     info!(target: "cf_tunnel", "downloading cloudflared...");
 
+    // IG6 fix: enforce TLS 1.2 minimum for cloudflared download (diagnosis.md §Group6).
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::limited(5))
+        .min_tls_version(reqwest::tls::Version::TLS_1_2)
         .build()
         .context("build reqwest client")?;
 
@@ -315,15 +317,22 @@ fn fire_notification(url: &str, pairing_token: &str) {
         "****".to_string()
     };
 
-    // Print for user visibility.
+    // Print masked URL only — never expose the raw token to stdout
+    // (terminal scrollback / tmux pipe-pane / launchd capture risk).
+    // Full token is delivered via macOS notification only (requires
+    // physical device presence).  Use `telayd status --reveal` for
+    // recovery.  (IG5 fix: diagnosis.md §Group5)
     println!(
         "\nTunnel: {}#token={}\nmacOS notification fired.",
-        url, pairing_token
+        url, token_masked
     );
 
+    // Notification includes the full token so the user can copy it from
+    // the phone notification banner.  This is intentional: macOS
+    // notifications require physical device access (no remote capture).
     let script = format!(
         r#"display notification "Open: {}#token={}" with title "Telayd" sound name "Glass""#,
-        url, token_masked
+        url, pairing_token
     );
 
     // Fire-and-forget — failure is non-fatal.
