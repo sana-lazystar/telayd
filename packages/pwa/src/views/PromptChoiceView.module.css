@@ -1,0 +1,223 @@
+/**
+ * PromptChoiceView styles
+ * Full-height layout: header / scrollable choices / sticky footer
+ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  height: var(--header-height);
+  background-color: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border-default);
+  flex-shrink: 0;
+}
+
+.headerTitle {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.modeButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  min-height: 32px;
+  min-width: 32px;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-md);
+  transition: background-color var(--duration-fast);
+}
+
+.modeButton:hover {
+  background-color: var(--color-bg-elevated);
+}
+
+.modeBadge {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.modeBadge--plan {
+  background-color: var(--color-mode-plan-bg);
+  color: var(--color-mode-plan-text);
+  border-color: var(--color-accent-blue);
+}
+
+.modeBadge--acceptedits {
+  background-color: var(--color-mode-accept-bg);
+  color: var(--color-mode-accept-text);
+  border-color: var(--color-status-connected);
+}
+
+.modeBadge--default {
+  background-color: var(--color-mode-default-bg);
+  color: var(--color-mode-default-text);
+  border-color: var(--color-border-default);
+}
+
+/* Scroll area */
+.scrollArea {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Context block */
+.contextSection {
+  /* full width */
+}
+
+/* Choices */
+.choicesSection {
+  /* full width */
+}
+
+.choicesList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Free text */
+.freeTextSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.freeTextToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  min-height: var(--touch-target-min);
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: border-color var(--duration-fast);
+}
+
+.freeTextToggle:hover:not(:disabled) {
+  border-color: var(--color-border-active);
+  color: var(--color-text-primary);
+}
+
+.toggleArrow {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.freeTextForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.freeTextarea {
+  min-height: 120px;
+  resize: vertical;
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-sm);
+  padding: var(--space-3);
+  line-height: var(--line-height-relaxed);
+}
+
+.freeTextActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+.charCount {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+}
+
+.sendButton {
+  padding: var(--space-2) var(--space-4);
+  background-color: var(--color-accent-blue);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  min-height: var(--touch-target-min);
+  transition: background-color var(--duration-fast);
+}
+
+.sendButton:hover:not(:disabled) {
+  background-color: var(--color-accent-blue-hover);
+}
+
+/* Status banners */
+.errorBanner {
+  padding: var(--space-3) var(--space-4);
+  background-color: rgba(248, 81, 73, 0.15);
+  border: 1px solid var(--color-status-error);
+  border-radius: var(--radius-md);
+  color: var(--color-text-danger);
+  font-size: var(--font-size-sm);
+}
+
+.retryBanner {
+  padding: var(--space-3) var(--space-4);
+  background-color: rgba(210, 153, 34, 0.15);
+  border: 1px solid var(--color-status-error);
+  border-radius: var(--radius-md);
+  color: var(--color-text-warning);
+  font-size: var(--font-size-sm);
+}
+
+/* Footer */
+.footer {
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-border-default);
+  background-color: var(--color-bg-base);
+  flex-shrink: 0;
+}
+
+.cancelButton {
+  width: 100%;
+  min-height: var(--touch-target-min);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: background-color var(--duration-fast);
+}
+
+.cancelButton:hover:not(:disabled) {
+  background-color: var(--color-bg-overlay);
+  color: var(--color-text-primary);
+}

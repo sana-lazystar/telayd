@@ -1,0 +1,78 @@
+/**
+ * DisconnectedView styles
+ */
+
+.container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  height: 100dvh;
+  padding: var(--space-6) var(--space-4);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  text-align: center;
+  max-width: 300px;
+}
+
+.icon {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.iconSpinner {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--color-border-default);
+  border-top-color: var(--color-status-connecting);
+  border-radius: var(--radius-full);
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.message {
+  font-size: var(--font-size-base);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed);
+}
+
+.attempt {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+}
+
+.reconnectButton {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  min-height: var(--touch-target-min);
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-active);
+  border-radius: var(--radius-md);
+  color: var(--color-text-link);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+  transition: background-color var(--duration-fast);
+}
+
+.reconnectButton:hover {
+  background-color: var(--color-accent-blue-muted);
+}

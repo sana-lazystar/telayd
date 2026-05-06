@@ -1,0 +1,14 @@
+{
+  "name": "telayd",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "pnpm --filter pwa build",
+    "dev": "pnpm --filter pwa dev",
+    "lint": "pnpm --filter pwa lint",
+    "format": "pnpm --filter pwa format"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4"
+  }
+}

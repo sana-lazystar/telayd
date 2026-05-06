@@ -1,0 +1,173 @@
+/**
+ * App.tsx — SPA root + state machine (FE-pwa-4)
+ * 7-page state routing via useReducer (no router library)
+ * WsClient callbacks bridge to app state dispatch
+ */
+
+import { useCallback, useEffect, useReducer } from 'react'
+import { appReducer, initialState } from './state/app-state'
+import { ConnectingView } from './views/ConnectingView'
+import { DisconnectedView } from './views/DisconnectedView'
+import { IdleView } from './views/IdleView'
+import { PairingErrorView } from './views/PairingErrorView'
+import { PairingView } from './views/PairingView'
+import { PermissionModeView } from './views/PermissionModeView'
+import { PromptChoiceView } from './views/PromptChoiceView'
+import type {
+  ModeToggleAckPayload,
+  PairingAckPayload,
+  PairingRejectPayload,
+  PermissionMode,
+} from './lib/protocol'
+import type { InquiryPushPayload } from './lib/protocol'
+import { wsClient } from './lib/ws-client'
+import type { WsStatus } from './lib/ws-client'
+
+export function App() {
+  const [state, dispatch] = useReducer(appReducer, initialState)
+
+  // Wire WsClient callbacks → app state dispatch
+  const handleStatusChange = useCallback((status: WsStatus) => {
+    switch (status) {
+      case 'reconnecting':
+        dispatch({ type: 'WS_RECONNECTING', attempt: wsClient.getReconnectAttempt() })
+        break
+      case 'pairing-error':
+        dispatch({ type: 'WS_TIMEOUT' })
+        break
+      default:
+        // 'idle', 'connecting', 'connected' — handled via pairing callbacks
+        break
+    }
+  }, [])
+
+  const handlePairingAck = useCallback((payload: PairingAckPayload) => {
+    dispatch({
+      type: 'PAIRING_ACK',
+      sessionId: payload.session,
+      serverVersion: payload.server_version,
+    })
+  }, [])
+
+  const handlePairingReject = useCallback((payload: PairingRejectPayload) => {
+    dispatch({ type: 'PAIRING_REJECT', reason: payload.reason })
+  }, [])
+
+  const handleInquiryPush = useCallback((payload: InquiryPushPayload) => {
+    dispatch({ type: 'INQUIRY_PUSH', payload })
+  }, [])
+
+  const handleModeToggleAck = useCallback((payload: ModeToggleAckPayload) => {
+    if (payload.applied) {
+      dispatch({ type: 'MODE_UPDATED', mode: payload.mode })
+    }
+  }, [])
+
+  // Register callbacks — ack/error are handled inside view components directly
+  useEffect(() => {
+    wsClient.setCallbacks({
+      onStatusChange: handleStatusChange,
+      onPairingAck: handlePairingAck,
+      onPairingReject: handlePairingReject,
+      onInquiryPush: handleInquiryPush,
+      onModeToggleAck: handleModeToggleAck,
+    })
+    return () => {
+      wsClient.setCallbacks({})
+    }
+  }, [
+    handleStatusChange,
+    handlePairingAck,
+    handlePairingReject,
+    handleInquiryPush,
+    handleModeToggleAck,
+  ])
+
+  // Handlers
+  function handleConnect(url: string, token: string) {
+    dispatch({ type: 'CONNECT_START', tunnelUrl: url })
+    wsClient.connect(url, token)
+  }
+
+  function handleReconnect() {
+    // Go back to pairing — user re-enters token
+    dispatch({ type: 'RESET_TO_PAIRING' })
+  }
+
+  function handleInquiryResolved() {
+    dispatch({ type: 'INQUIRY_RESOLVED' })
+  }
+
+  function handleOpenModeToggle() {
+    dispatch({ type: 'OPEN_PERMISSION_MODE' })
+  }
+
+  function handleModeApplied(mode: PermissionMode) {
+    dispatch({ type: 'MODE_UPDATED', mode })
+  }
+
+  function handleModeCancel() {
+    dispatch({ type: 'CLOSE_PERMISSION_MODE' })
+  }
+
+  function handleRepair() {
+    wsClient.disconnect()
+    dispatch({ type: 'RESET_TO_PAIRING' })
+  }
+
+  const { page } = state
+
+  return (
+    <div className="app-container">
+      {page === 'pairing' && (
+        <PairingView
+          onConnect={handleConnect}
+          loading={false}
+        />
+      )}
+
+      {page === 'connecting' && (
+        <ConnectingView />
+      )}
+
+      {page === 'idle' && (
+        <IdleView
+          permissionMode={state.permissionMode}
+          serverVersion={state.serverVersion ?? undefined}
+          onOpenModeToggle={handleOpenModeToggle}
+        />
+      )}
+
+      {page === 'prompt-choice' && state.activeInquiry && (
+        <PromptChoiceView
+          inquiry={state.activeInquiry}
+          permissionMode={state.permissionMode}
+          onResolved={handleInquiryResolved}
+          onOpenModeToggle={handleOpenModeToggle}
+        />
+      )}
+
+      {page === 'permission-mode' && (
+        <PermissionModeView
+          current={state.permissionMode}
+          onApplied={handleModeApplied}
+          onCancel={handleModeCancel}
+        />
+      )}
+
+      {page === 'disconnected' && (
+        <DisconnectedView
+          attempt={state.reconnectAttempt}
+          onReconnect={handleReconnect}
+        />
+      )}
+
+      {page === 'pairing-error' && (
+        <PairingErrorView
+          reason={state.pairingErrorReason}
+          onRepair={handleRepair}
+        />
+      )}
+    </div>
+  )
+}

@@ -1,0 +1,135 @@
+/**
+ * IdleView styles
+ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  height: var(--header-height);
+  background-color: var(--color-bg-surface);
+  border-bottom: 1px solid var(--color-border-default);
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-status-connected);
+  flex-shrink: 0;
+  /* Pulse animation */
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.statusText {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.versionBadge {
+  font-family: var(--font-family-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-elevated);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+
+.modeButton {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  min-height: 32px;
+  min-width: 32px;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-md);
+  transition: background-color var(--duration-fast);
+}
+
+.modeButton:hover {
+  background-color: var(--color-bg-elevated);
+}
+
+.modeBadge {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.modeBadge--plan {
+  background-color: var(--color-mode-plan-bg);
+  color: var(--color-mode-plan-text);
+  border-color: var(--color-accent-blue);
+}
+
+.modeBadge--acceptedits {
+  background-color: var(--color-mode-accept-bg);
+  color: var(--color-mode-accept-text);
+  border-color: var(--color-status-connected);
+}
+
+.modeBadge--default {
+  background-color: var(--color-mode-default-bg);
+  color: var(--color-mode-default-text);
+  border-color: var(--color-border-default);
+}
+
+/* Content */
+.content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6) var(--space-4);
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+  max-width: 280px;
+}
+
+.emptyIcon {
+  font-size: 48px;
+  color: var(--color-text-muted);
+  opacity: 0.4;
+}
+
+.emptyTitle {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.emptyMessage {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed);
+}

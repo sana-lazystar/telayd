@@ -1,0 +1,118 @@
+/**
+ * ChoiceButton styles
+ * Design system: accent-blue buttons with index badge
+ * Touch target >= 44px enforced
+ */
+
+.choiceButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--touch-target-min);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  color: var(--color-text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--easing-default),
+    border-color var(--duration-fast) var(--easing-default),
+    transform var(--duration-fast) var(--easing-default);
+  position: relative;
+  overflow: hidden;
+}
+
+.choiceButton:hover:not(:disabled) {
+  background-color: var(--color-accent-blue-muted);
+  border-color: var(--color-accent-blue);
+}
+
+.choiceButton:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.choiceButton:focus-visible {
+  outline: 2px solid var(--color-border-active);
+  outline-offset: 2px;
+}
+
+.choiceButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.indexBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-accent-blue-muted);
+  color: var(--color-accent-blue-hover);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  font-family: var(--font-family-mono);
+  flex-shrink: 0;
+  border: 1px solid var(--color-accent-blue);
+}
+
+.choiceButton:hover:not(:disabled) .indexBadge {
+  background-color: var(--color-accent-blue);
+  color: #ffffff;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  line-height: var(--line-height-tight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.description {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-base);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Spinner */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border-default);
+  border-top-color: var(--color-accent-blue-hover);
+  border-radius: var(--radius-full);
+  animation: spin 600ms linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Mobile: full width stays */
+@media (max-width: 480px) {
+  .choiceButton {
+    padding: var(--space-3) var(--space-3);
+  }
+}

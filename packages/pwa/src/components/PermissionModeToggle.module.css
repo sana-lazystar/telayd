@@ -1,0 +1,77 @@
+/**
+ * PermissionModeToggle styles
+ * Radio group styled as card selection
+ */
+
+.toggleGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.modeOption {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--easing-default),
+    background-color var(--duration-fast) var(--easing-default);
+  min-height: var(--touch-target-min);
+}
+
+.modeOption:hover:not(:has(.radioInput:disabled)) {
+  border-color: var(--color-border-active);
+  background-color: var(--color-accent-blue-muted);
+}
+
+.modeOption.selected {
+  border-color: var(--color-accent-blue);
+  background-color: var(--color-accent-blue-muted);
+}
+
+.radioInput {
+  /* Visually hidden but accessible */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.modeContent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+}
+
+.modeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modeLabel {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+}
+
+.checkmark {
+  color: var(--color-status-connected);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+.modeDescription {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-base);
+}
