@@ -5,6 +5,11 @@
  * - visibilitychange foreground hook
  * - envelope serialize/deserialize (protocol.ts)
  * Security: token never logged, envelope schema validated
+ *
+ * Fix: IG1 — delete heartbeat sender (daemon Ping/Pong covers it); per-type narrowing
+ * Fix: IG2 — handle close 4002 (replaced); do not reconnect
+ * Fix: IG3 — add 'disconnected' to WsStatus; call _reconnect.start() on unplanned close
+ * Fix: IG4 — subscribeAck / subscribeError API replacing global callback swap pattern
  */
 
 import {
@@ -20,11 +25,13 @@ import {
 } from './protocol'
 import { ReconnectScheduler } from './reconnect'
 
+// IG3: add 'disconnected' to WsStatus union (was missing — cast as WsStatus at line 127)
 export type WsStatus =
   | 'idle'
   | 'connecting'
   | 'connected'
   | 'reconnecting'
+  | 'disconnected'
   | 'pairing-error'
 
 export interface WsClientCallbacks {
@@ -32,9 +39,80 @@ export interface WsClientCallbacks {
   onPairingAck?: (payload: PairingAckPayload) => void
   onPairingReject?: (payload: PairingRejectPayload) => void
   onInquiryPush?: (payload: InquiryPushPayload) => void
-  onInquiryAck?: (payload: InquiryAckPayload) => void
-  onInquiryError?: (payload: InquiryErrorPayload) => void
   onModeToggleAck?: (payload: ModeToggleAckPayload) => void
+}
+
+/** Per-inquiry ack/error handler (IG4) */
+interface AckHandler {
+  onAck: (payload: InquiryAckPayload) => void
+  onError: (payload: InquiryErrorPayload) => void
+}
+
+/** Narrow raw payload to InquiryPushPayload with required field checks */
+function narrowInquiryPushPayload(payload: unknown): InquiryPushPayload | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const p = payload as Record<string, unknown>
+  if (
+    typeof p.tool_use_id !== 'string' ||
+    typeof p.session_id !== 'string' ||
+    typeof p.tmux_session !== 'string' ||
+    typeof p.header !== 'string' ||
+    !Array.isArray(p.questions) ||
+    typeof p.created_at !== 'string'
+  ) {
+    return null
+  }
+  // Validate questions array shape (at least check first item if present)
+  const questions = p.questions as unknown[]
+  for (const q of questions) {
+    if (typeof q !== 'object' || q === null) return null
+    const qi = q as Record<string, unknown>
+    if (
+      typeof qi.question !== 'string' ||
+      !Array.isArray(qi.options) ||
+      typeof qi.multiSelect !== 'boolean'
+    ) {
+      return null
+    }
+  }
+  return payload as InquiryPushPayload
+}
+
+function narrowPairingAckPayload(payload: unknown): PairingAckPayload | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const p = payload as Record<string, unknown>
+  if (typeof p.session !== 'string' || typeof p.server_version !== 'string') return null
+  return payload as PairingAckPayload
+}
+
+function narrowPairingRejectPayload(payload: unknown): PairingRejectPayload | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const p = payload as Record<string, unknown>
+  if (typeof p.reason !== 'string') return null
+  return payload as PairingRejectPayload
+}
+
+function narrowInquiryAckPayload(payload: unknown): InquiryAckPayload | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const p = payload as Record<string, unknown>
+  if (typeof p.tool_use_id !== 'string' || typeof p.latency_ms !== 'number') return null
+  return payload as InquiryAckPayload
+}
+
+function narrowInquiryErrorPayload(payload: unknown): InquiryErrorPayload | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const p = payload as Record<string, unknown>
+  if (typeof p.tool_use_id !== 'string' || typeof p.reason !== 'string') return null
+  const validReasons = ['dialog-not-ready', 'send-keys-failed', 'inquiry-stale', 'validation']
+  if (!validReasons.includes(p.reason as string)) return null
+  return payload as InquiryErrorPayload
+}
+
+function narrowModeToggleAckPayload(payload: unknown): ModeToggleAckPayload | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const p = payload as Record<string, unknown>
+  if (typeof p.mode !== 'string' || typeof p.applied !== 'boolean') return null
+  return payload as ModeToggleAckPayload
 }
 
 export class WsClient {
@@ -43,7 +121,8 @@ export class WsClient {
   private _ws: WebSocket | null = null
   private _status: WsStatus = 'idle'
   private _callbacks: WsClientCallbacks = {}
-  private _heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  // IG4: per-tool_use_id ack handlers (replaces global callback swap)
+  private _ackHandlers = new Map<string, AckHandler>()
   private _reconnect: ReconnectScheduler
 
   constructor() {
@@ -61,8 +140,20 @@ export class WsClient {
     return { ...this._callbacks }
   }
 
+  /**
+   * IG4: Subscribe to ack/error for a specific tool_use_id.
+   * Returns an unsubscribe function — call it in useEffect cleanup.
+   */
+  subscribeAck(toolUseId: string, handler: AckHandler): () => void {
+    this._ackHandlers.set(toolUseId, handler)
+    return () => {
+      this._ackHandlers.delete(toolUseId)
+    }
+  }
+
   connect(wsUrl: string, token: string): void {
     // Build wss URL from tunnel URL
+    // IG1: regex was /^https?:\/\// — correct for both http/https input
     const url = wsUrl.replace(/^https?:\/\//, 'wss://')
     this._url = url
     this._token = token
@@ -72,7 +163,6 @@ export class WsClient {
 
   disconnect(): void {
     this._reconnect.reset()
-    this._clearHeartbeat()
     if (this._ws) {
       this._ws.close(1000, 'user-disconnect')
       this._ws = null
@@ -84,6 +174,11 @@ export class WsClient {
     if (this._ws?.readyState === WebSocket.OPEN) {
       this._ws.send(JSON.stringify(envelope))
     }
+  }
+
+  /** Send a mode-toggle-request envelope */
+  sendModeToggle(mode: 'plan' | 'accept-edits' | 'default'): void {
+    this.send(makeEnvelope('mode-toggle-request', { mode }))
   }
 
   get status(): WsStatus {
@@ -115,21 +210,30 @@ export class WsClient {
       }
 
       ws.onclose = (evt: CloseEvent) => {
-        this._clearHeartbeat()
+        // IG1: no heartbeat to clear
 
         if (evt.code === 4001) {
           // Token mismatch — go to pairing error, don't reconnect
           this._setStatus('pairing-error')
           return
         }
+        if (evt.code === 4002) {
+          // IG2: replaced by another client — show error, do NOT auto-reconnect
+          this._setStatus('pairing-error')
+          this._callbacks.onPairingReject?.({
+            reason: 'token-mismatch', // surfaced as pairing-error with separate reason display
+          })
+          return
+        }
         if (evt.code === 4003) {
-          // Server shutdown — don't auto-reconnect
-          this._setStatus('disconnected' as WsStatus)
+          // IG3: server shutdown — set 'disconnected' (was: 'disconnected' as WsStatus cast)
+          this._setStatus('disconnected')
           return
         }
 
-        // Schedule reconnect
-        this._reconnect.scheduleNext()
+        // Unplanned close (1006, network drop, etc.) — schedule reconnect
+        // IG3: call start() so visibilitychange listener + budget anchor are set up
+        this._reconnect.start()
       }
 
       ws.onerror = () => {
@@ -156,52 +260,56 @@ export class WsClient {
 
     switch (env.type) {
       case 'pairing-ack': {
+        const payload = narrowPairingAckPayload(env.payload)
+        if (!payload) return
         this._reconnect.reset()
         this._setStatus('connected')
-        this._startHeartbeat()
-        this._callbacks.onPairingAck?.(env.payload as PairingAckPayload)
+        // IG1: no heartbeat sender — daemon sends Ping, browser auto-Pong
+        this._callbacks.onPairingAck?.(payload)
         break
       }
       case 'pairing-reject': {
+        const payload = narrowPairingRejectPayload(env.payload)
+        if (!payload) return
         this._setStatus('pairing-error')
-        this._callbacks.onPairingReject?.(env.payload as PairingRejectPayload)
+        this._callbacks.onPairingReject?.(payload)
         break
       }
       case 'inquiry-push': {
-        this._callbacks.onInquiryPush?.(env.payload as InquiryPushPayload)
+        // IG1: per-type narrowing for inquiry-push (UI directly depends on questions[0].options[])
+        const payload = narrowInquiryPushPayload(env.payload)
+        if (!payload) return
+        this._callbacks.onInquiryPush?.(payload)
         break
       }
       case 'inquiry-ack': {
-        this._callbacks.onInquiryAck?.(env.payload as InquiryAckPayload)
+        const payload = narrowInquiryAckPayload(env.payload)
+        if (!payload) return
+        // IG4: route to per-inquiry handler first
+        const handler = this._ackHandlers.get(payload.tool_use_id)
+        if (handler) {
+          handler.onAck(payload)
+        }
         break
       }
       case 'inquiry-error': {
-        this._callbacks.onInquiryError?.(env.payload as InquiryErrorPayload)
+        const payload = narrowInquiryErrorPayload(env.payload)
+        if (!payload) return
+        // IG4: route to per-inquiry handler first
+        const handler = this._ackHandlers.get(payload.tool_use_id)
+        if (handler) {
+          handler.onError(payload)
+        }
         break
       }
       case 'mode-toggle-ack': {
-        this._callbacks.onModeToggleAck?.(env.payload as ModeToggleAckPayload)
+        const payload = narrowModeToggleAckPayload(env.payload)
+        if (!payload) return
+        this._callbacks.onModeToggleAck?.(payload)
         break
       }
       default:
         break
-    }
-  }
-
-  private _startHeartbeat(): void {
-    // Send ping every 30s (architecture.md §2.1)
-    this._clearHeartbeat()
-    this._heartbeatTimer = setInterval(() => {
-      if (this._ws?.readyState === WebSocket.OPEN) {
-        this._ws.send(JSON.stringify({ v: 1, type: 'ping', id: 'hb', ts: new Date().toISOString(), payload: {} }))
-      }
-    }, 30_000)
-  }
-
-  private _clearHeartbeat(): void {
-    if (this._heartbeatTimer !== null) {
-      clearInterval(this._heartbeatTimer)
-      this._heartbeatTimer = null
     }
   }
 

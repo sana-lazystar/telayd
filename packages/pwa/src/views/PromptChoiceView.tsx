@@ -8,9 +8,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChoiceButton } from '../components/ChoiceButton'
 import { PromptContextBlock } from '../components/PromptContextBlock'
+import { t } from '../lib/i18n'
 import type { InquiryPushPayload, InquiryResponsePayload, PermissionMode } from '../lib/protocol'
 import { makeEnvelope } from '../lib/protocol'
-import { t } from '../lib/i18n'
 import { wsClient } from '../lib/ws-client'
 import styles from './PromptChoiceView.module.css'
 
@@ -26,12 +26,7 @@ interface Props {
 
 type SendState = 'idle' | 'sending' | 'retrying' | 'error'
 
-export function PromptChoiceView({
-  inquiry,
-  permissionMode,
-  onResolved,
-  onOpenModeToggle,
-}: Props) {
+export function PromptChoiceView({ inquiry, permissionMode, onResolved, onOpenModeToggle }: Props) {
   const question = inquiry.questions[0]
   const isMultiSelect = question?.multiSelect ?? false
   const options = question?.options ?? []
@@ -101,52 +96,62 @@ export function PromptChoiceView({
       makeEnvelope('inquiry-response', {
         tool_use_id: inquiry.tool_use_id,
         cancel: true,
-      })
+      }),
     )
     onResolved()
   }
 
-  // Listen for ack/error from ws-client via global event system
+  // IG4: per-tool_use_id subscription — no global callback swap / chain leak
   useEffect(() => {
-    const prevCallbacks = wsClient.getCallbacks()
-
-    wsClient.setCallbacks({
-      ...prevCallbacks,
-      onInquiryAck: (ackPayload) => {
-        if (ackPayload.tool_use_id === inquiry.tool_use_id) {
-          if (timeoutRef.current) clearTimeout(timeoutRef.current)
-          onResolved()
-        }
-        prevCallbacks.onInquiryAck?.(ackPayload)
+    const unsubscribe = wsClient.subscribeAck(inquiry.tool_use_id, {
+      onAck: (_ackPayload) => {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        onResolved()
       },
-      onInquiryError: (errPayload) => {
-        if (errPayload.tool_use_id === inquiry.tool_use_id) {
-          if (timeoutRef.current) clearTimeout(timeoutRef.current)
-          setSendState('error')
-          setErrorMsg(t('choice.error', { reason: errPayload.reason }))
+      onError: (errPayload) => {
+        if (timeoutRef.current) clearTimeout(timeoutRef.current)
+        setSendState('error')
+        // IG1: switch-on-reason for typed i18n keys
+        switch (errPayload.reason) {
+          case 'send-keys-failed':
+            setErrorMsg(t('choice.error.sendKeysFailed'))
+            break
+          case 'dialog-not-ready':
+            setErrorMsg(t('choice.error.dialogNotReady'))
+            break
+          case 'inquiry-stale':
+            setErrorMsg(t('choice.error.inquiryStale'))
+            break
+          case 'validation':
+            setErrorMsg(t('choice.error.validation'))
+            break
+          default:
+            setErrorMsg(t('choice.error.sendKeysFailed'))
         }
-        prevCallbacks.onInquiryError?.(errPayload)
       },
     })
 
     return () => {
-      wsClient.setCallbacks(prevCallbacks)
+      unsubscribe()
     }
   }, [inquiry.tool_use_id, onResolved])
 
   const isSending = sendState === 'sending' || sendState === 'retrying'
 
   return (
-    <div className={styles.container} role="main">
+    <main className={styles.container}>
       {/* Header bar with mode indicator */}
       <header className={styles.header}>
         <h2 className={styles.headerTitle}>Claude Code 질문</h2>
         <button
+          type="button"
           className={styles.modeButton}
           onClick={onOpenModeToggle}
           aria-label={`현재 모드: ${permissionMode}. 변경하려면 클릭`}
         >
-          <span className={`${styles.modeBadge} ${styles[`modeBadge--${permissionMode.replace('-', '')}`]}`}>
+          <span
+            className={`${styles.modeBadge} ${styles[`modeBadge--${permissionMode.replace('-', '')}`]}`}
+          >
             {t(`modeLabel.${permissionMode as 'plan' | 'accept-edits' | 'default'}`)}
           </span>
         </button>
@@ -154,19 +159,16 @@ export function PromptChoiceView({
 
       <div className={styles.scrollArea}>
         {/* Prompt context */}
-        <div className={styles.contextSection}>
-          <PromptContextBlock
-            inquiry={inquiry}
-            showMultiSelectWarning={isMultiSelect}
-          />
-        </div>
+        <section className={styles.contextSection}>
+          <PromptContextBlock inquiry={inquiry} showMultiSelectWarning={isMultiSelect} />
+        </section>
 
         {/* Choice buttons */}
         {!isMultiSelect && options.length > 0 && (
-          <div className={styles.choicesSection}>
-            <div className={styles.choicesList} role="list">
+          <section className={styles.choicesSection}>
+            <ul className={styles.choicesList}>
               {options.map((option) => (
-                <div key={option.index} role="listitem">
+                <li key={option.index}>
                   <ChoiceButton
                     index={option.index}
                     label={option.label}
@@ -175,10 +177,10 @@ export function PromptChoiceView({
                     loading={activeIndex === option.index && isSending}
                     onClick={handleChoiceClick}
                   />
-                </div>
+                </li>
               ))}
-            </div>
-          </div>
+            </ul>
+          </section>
         )}
 
         {/* Free-text section */}
@@ -237,9 +239,7 @@ export function PromptChoiceView({
         )}
 
         {sendState === 'retrying' && (
-          <div className={styles.retryBanner} role="status">
-            <span>{t('choice.retrying')}</span>
-          </div>
+          <output className={styles.retryBanner}>{t('choice.retrying')}</output>
         )}
       </div>
 
@@ -254,6 +254,6 @@ export function PromptChoiceView({
           {t('choice.cancelButton')}
         </button>
       </footer>
-    </div>
+    </main>
   )
 }

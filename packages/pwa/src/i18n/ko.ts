@@ -18,6 +18,8 @@ export const ko = {
     urlError: '올바른 trycloudflare.com URL을 입력하세요',
     tokenError: '토큰은 영문/숫자/하이픈/언더스코어 43자여야 합니다',
     autoDetected: 'URL에서 자동 감지됨',
+    // IG2: replaced by another client
+    replaced: '다른 기기에서 연결되어 현재 연결이 종료되었습니다.',
   },
 
   // Connection states
@@ -59,7 +61,13 @@ export const ko = {
     timeout: '응답 시간이 초과되었습니다. 다시 시도합니다...',
     retrying: '재시도 중...',
     injected: '응답이 주입되었습니다',
-    error: '오류가 발생했습니다: {reason}',
+    // IG1: typed error reason keys (replaces generic {reason} interpolation)
+    error: {
+      sendKeysFailed: '키 입력 전송에 실패했습니다. 터미널을 확인하세요.',
+      dialogNotReady: '다이얼로그가 준비되지 않았습니다. 잠시 후 다시 시도하세요.',
+      inquiryStale: '요청이 만료되었습니다.',
+      validation: '잘못된 응답 형식입니다.',
+    },
     multiSelectWarning: '복수 선택 질문은 수동으로 응답해주세요',
   },
 
@@ -77,6 +85,7 @@ export const ko = {
     applying: '적용 중...',
     applied: '적용 완료',
     timeout: '응답이 없습니다. 다시 시도합니다...',
+    notSupported: '현재 모드는 변경할 수 없습니다.',
     cancelButton: '취소',
   },
 

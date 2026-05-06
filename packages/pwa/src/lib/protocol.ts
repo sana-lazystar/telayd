@@ -33,8 +33,15 @@ export interface PairingAckPayload {
   server_version: string
 }
 
+export type PairingRejectReason =
+  | 'token-mismatch'
+  | 'expired'
+  | 'bad-envelope'
+  | 'bad-payload'
+  | 'unsupported-version'
+
 export interface PairingRejectPayload {
-  reason: 'token-mismatch' | 'expired'
+  reason: PairingRejectReason
 }
 
 export interface QuestionOption {
@@ -51,9 +58,13 @@ export interface InquiryQuestion {
 
 export interface InquiryPushPayload {
   tool_use_id: string
+  session_id: string
   tmux_session: string
   header: string
   questions: InquiryQuestion[]
+  created_at: string
+  /** optional debug field (architecture.md §2.3 M-04) */
+  permission_mode?: string
 }
 
 /** Exactly one of choice_index / free_text / cancel must be set */
@@ -67,9 +78,15 @@ export interface InquiryAckPayload {
   latency_ms: number
 }
 
+export type InquiryErrorReason =
+  | 'dialog-not-ready'
+  | 'send-keys-failed'
+  | 'inquiry-stale'
+  | 'validation'
+
 export interface InquiryErrorPayload {
   tool_use_id: string
-  reason: string
+  reason: InquiryErrorReason
 }
 
 export type PermissionMode = 'plan' | 'accept-edits' | 'default'
@@ -101,11 +118,7 @@ export function generateId(): string {
   return `pwa-${Date.now()}-${_seqCounter}`
 }
 
-export function makeEnvelope<P>(
-  type: MessageType,
-  payload: P,
-  id?: string,
-): Envelope<P> {
+export function makeEnvelope<P>(type: MessageType, payload: P, id?: string): Envelope<P> {
   return {
     v: 1,
     type,
@@ -120,12 +133,12 @@ export function parseEnvelope(raw: unknown): Envelope | null {
   if (typeof raw !== 'object' || raw === null) return null
   const obj = raw as Record<string, unknown>
   if (
-    obj['v'] !== 1 ||
-    typeof obj['type'] !== 'string' ||
-    typeof obj['id'] !== 'string' ||
-    typeof obj['ts'] !== 'string' ||
-    typeof obj['payload'] !== 'object' ||
-    obj['payload'] === null
+    obj.v !== 1 ||
+    typeof obj.type !== 'string' ||
+    typeof obj.id !== 'string' ||
+    typeof obj.ts !== 'string' ||
+    typeof obj.payload !== 'object' ||
+    obj.payload === null
   ) {
     return null
   }
@@ -140,6 +153,6 @@ export function parseEnvelope(raw: unknown): Envelope | null {
     'mode-toggle-request',
     'mode-toggle-ack',
   ]
-  if (!validTypes.includes(obj['type'] as MessageType)) return null
+  if (!validTypes.includes(obj.type as MessageType)) return null
   return obj as unknown as Envelope
 }
