@@ -104,7 +104,10 @@ export function PairingForm({ onConnect, loading = false }: Props) {
           className={`${styles.input} ${urlError ? styles.inputError : ''}`}
           type="url"
           value={url}
-          onChange={(e) => { setUrl(e.target.value); setUrlError('') }}
+          onChange={(e) => {
+            setUrl(e.target.value)
+            setUrlError('')
+          }}
           placeholder={t('pairing.urlPlaceholder')}
           autoCapitalize="none"
           autoCorrect="off"
@@ -114,7 +117,9 @@ export function PairingForm({ onConnect, loading = false }: Props) {
           disabled={loading}
         />
         {urlError && (
-          <p id="url-error" className={styles.errorText} role="alert">{urlError}</p>
+          <p id="url-error" className={styles.errorText} role="alert">
+            {urlError}
+          </p>
         )}
         {!urlError && url && (
           <p className={styles.helperText}>
@@ -138,8 +143,14 @@ export function PairingForm({ onConnect, loading = false }: Props) {
           type="password"
           autoComplete="off"
           spellCheck={false}
+          // IG11: mobile keyboard hints — no uppercase on token input
+          inputMode="text"
+          autoCapitalize="none"
           value={token}
-          onChange={(e) => { setToken(e.target.value); setTokenError('') }}
+          onChange={(e) => {
+            setToken(e.target.value)
+            setTokenError('')
+          }}
           placeholder={t('pairing.tokenPlaceholder')}
           aria-describedby={tokenError ? 'token-error' : 'token-hint'}
           aria-invalid={tokenError ? 'true' : undefined}
@@ -147,7 +158,9 @@ export function PairingForm({ onConnect, loading = false }: Props) {
           maxLength={43}
         />
         {tokenError ? (
-          <p id="token-error" className={styles.errorText} role="alert">{tokenError}</p>
+          <p id="token-error" className={styles.errorText} role="alert">
+            {tokenError}
+          </p>
         ) : (
           <p id="token-hint" className={styles.helperText}>
             {token ? maskToken(token) : '43자 base64url 형식'}
@@ -155,12 +168,7 @@ export function PairingForm({ onConnect, loading = false }: Props) {
         )}
       </div>
 
-      <button
-        type="submit"
-        className={styles.submitButton}
-        disabled={loading}
-        aria-busy={loading}
-      >
+      <button type="submit" className={styles.submitButton} disabled={loading} aria-busy={loading}>
         {loading ? t('pairing.connecting') : t('pairing.connectButton')}
       </button>
     </form>

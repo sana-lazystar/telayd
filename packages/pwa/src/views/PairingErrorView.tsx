@@ -12,26 +12,25 @@ interface Props {
 }
 
 export function PairingErrorView({ reason, onRepair }: Props) {
-  const errorMessage = reason === 'token-mismatch'
-    ? t('pairingError.tokenMismatch')
-    : reason === 'expired'
-    ? t('pairingError.tokenMismatch')
-    : t('pairingError.connectionFailed')
+  const errorMessage =
+    reason === 'token-mismatch'
+      ? t('pairingError.tokenMismatch')
+      : reason === 'expired'
+        ? t('pairingError.tokenMismatch')
+        : t('pairingError.connectionFailed')
 
   return (
-    <div className={styles.container} role="main">
+    <main className={styles.container}>
       <div className={styles.content}>
-        <div className={styles.icon} aria-hidden="true">✕</div>
+        <div className={styles.icon} aria-hidden="true">
+          ✕
+        </div>
         <h2 className={styles.title}>{t('pairingError.title')}</h2>
         <p className={styles.message}>{errorMessage}</p>
-        <button
-          className={styles.repairButton}
-          onClick={onRepair}
-          type="button"
-        >
+        <button className={styles.repairButton} onClick={onRepair} type="button">
           {t('pairingError.repairButton')}
         </button>
       </div>
-    </div>
+    </main>
   )
 }

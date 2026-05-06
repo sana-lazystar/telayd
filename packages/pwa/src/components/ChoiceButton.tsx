@@ -38,6 +38,7 @@ export function ChoiceButton({
 
   return (
     <button
+      type="button"
       className={styles.choiceButton}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
@@ -50,13 +51,9 @@ export function ChoiceButton({
       </span>
       <span className={styles.content}>
         <span className={styles.label}>{label}</span>
-        {description && (
-          <span className={styles.description}>{description}</span>
-        )}
+        {description && <span className={styles.description}>{description}</span>}
       </span>
-      {loading && (
-        <span className={styles.spinner} aria-hidden="true" />
-      )}
+      {loading && <span className={styles.spinner} aria-hidden="true" />}
     </button>
   )
 }

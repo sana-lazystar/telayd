@@ -13,7 +13,7 @@ interface Props {
 
 export function DisconnectedView({ attempt, onReconnect }: Props) {
   return (
-    <div className={styles.container} role="main">
+    <main className={styles.container}>
       <div className={styles.content}>
         <div className={styles.icon} aria-hidden="true">
           <span className={styles.iconSpinner} />
@@ -21,18 +21,12 @@ export function DisconnectedView({ attempt, onReconnect }: Props) {
         <h2 className={styles.title}>{t('disconnected.title')}</h2>
         <p className={styles.message}>{t('disconnected.message')}</p>
         {attempt > 0 && (
-          <p className={styles.attempt} role="status">
-            {t('disconnected.retrying', { attempt })}
-          </p>
+          <output className={styles.attempt}>{t('disconnected.retrying', { attempt })}</output>
         )}
-        <button
-          className={styles.reconnectButton}
-          onClick={onReconnect}
-          type="button"
-        >
+        <button className={styles.reconnectButton} onClick={onReconnect} type="button">
           {t('disconnected.reconnectNow')}
         </button>
       </div>
-    </div>
+    </main>
   )
 }

@@ -8,12 +8,12 @@ import styles from './ConnectingView.module.css'
 
 export function ConnectingView() {
   return (
-    <div className={styles.container} role="main" aria-label={t('connecting.title')}>
+    <main className={styles.container} aria-label={t('connecting.title')}>
       <div className={styles.content}>
         <div className={styles.spinner} aria-hidden="true" />
         <h2 className={styles.title}>{t('connecting.title')}</h2>
         <p className={styles.message}>{t('connecting.message')}</p>
       </div>
-    </div>
+    </main>
   )
 }
