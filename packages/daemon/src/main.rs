@@ -255,11 +255,20 @@ async fn daemon_service_loop(cfg: config::Config, pid_path: std::path::PathBuf) 
     {
         let ws_state_fwd = ws_state.clone();
         let fwd_cancel = cancellation.clone();
+        let tmux_fwd = tmux.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     _ = fwd_cancel.cancelled() => break,
                     Some(inq) = inquiry_rx.recv() => {
+                        // Auto-register the hook-reported session so the tmux
+                        // controller's whitelist accepts subsequent injects.
+                        // Hook payload is the trust source: a payload reaching
+                        // this point has passed `payload.validate()` upstream.
+                        // (host-env-drift fix — dogfooding-discovered.)
+                        if !inq.tmux_session.is_empty() {
+                            tmux_fwd.register_session(&inq.tmux_session);
+                        }
                         if let Err(e) = ws_bridge::push_inquiry(&ws_state_fwd, inq).await {
                             tracing::warn!(target: "forwarder", err = %e, "push_inquiry failed");
                         }

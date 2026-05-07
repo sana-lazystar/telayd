@@ -59,6 +59,11 @@ pub struct HookPayload {
     pub tool_name: String,
     pub tool_input: ToolInput,
     pub tool_use_id: String,
+    /// tmux session name extracted by the hook script via `tmux display-message`.
+    /// Optional for backward compatibility with legacy probes; daemon falls back
+    /// to its startup-derived default when absent or empty (host-env-drift fix).
+    #[serde(default)]
+    pub tmux_session: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -318,7 +323,19 @@ async fn handle_connection(
     );
 
     payload.validate().context("validate hook payload")?;
-    let inquiry = payload.into_inquiry(tmux_session);
+
+    // Prefer the session reported by the hook (extracted via `tmux display-message`
+    // when the hook runs inside tmux). Fall back to the daemon's startup default
+    // when the hook ran outside tmux or the field is missing — keeps backward
+    // compatibility with legacy probes and `claude` invoked outside tmux.
+    let session_for_inquiry = payload
+        .tmux_session
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or(tmux_session);
+
+    let inquiry = payload.into_inquiry(session_for_inquiry);
 
     tx.send(inquiry).await.context("send inquiry to WS bridge")?;
     Ok(())
