@@ -188,6 +188,18 @@ describe('WsClient', () => {
     expect(msgCountAfter60s).toBe(msgCountAfterPairing)
   })
 
+  // IG4: close 4002 fires onPairingReject with reason 'replaced' (not 'token-mismatch')
+  it('close 4002 → onPairingReject with reason replaced (IG4)', () => {
+    const onPairingReject = vi.fn()
+    const client = makeClient()
+    client.setCallbacks({ onPairingReject })
+    connectAndPair(client)
+
+    mockWs?.serverClose(4002)
+    expect(onPairingReject).toHaveBeenCalledWith({ reason: 'replaced' })
+    expect(onPairingReject).not.toHaveBeenCalledWith({ reason: 'token-mismatch' })
+  })
+
   // IG1: per-type narrowing — invalid inquiry-push payload is silently dropped
   it('inquiry-push with missing session_id is silently dropped (IG1)', () => {
     const client = makeClient()

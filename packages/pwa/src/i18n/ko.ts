@@ -46,6 +46,10 @@ export const ko = {
   pairingError: {
     title: '페어링 오류',
     tokenMismatch: '토큰이 일치하지 않습니다. 데몬에서 토큰을 확인하세요.',
+    // IG4: 'expired' gets its own message (was incorrectly mapped to tokenMismatch)
+    expired: '페어링 토큰이 만료되었습니다. 데몬을 재시작하거나 새 토큰을 생성하세요.',
+    // IG4: 'replaced' = another device connected and took over this slot
+    replaced: '다른 기기에서 연결되어 현재 연결이 종료되었습니다.',
     connectionFailed: '30초 동안 연결에 실패했습니다.',
     repairButton: '다시 페어링',
   },

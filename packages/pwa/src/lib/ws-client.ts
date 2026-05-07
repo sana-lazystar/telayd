@@ -218,10 +218,11 @@ export class WsClient {
           return
         }
         if (evt.code === 4002) {
-          // IG2: replaced by another client — show error, do NOT auto-reconnect
+          // IG4: replaced by another client — distinct from auth failure (4001 / token-mismatch).
+          // Use 'replaced' reason so PairingErrorView can show the correct "다른 기기에서 연결됨" UX.
           this._setStatus('pairing-error')
           this._callbacks.onPairingReject?.({
-            reason: 'token-mismatch', // surfaced as pairing-error with separate reason display
+            reason: 'replaced',
           })
           return
         }

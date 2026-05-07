@@ -39,6 +39,8 @@ export type PairingRejectReason =
   | 'bad-envelope'
   | 'bad-payload'
   | 'unsupported-version'
+  // IG4: close 4002 — a different client replaced this connection (distinct from auth failure)
+  | 'replaced'
 
 export interface PairingRejectPayload {
   reason: PairingRejectReason

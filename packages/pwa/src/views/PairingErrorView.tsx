@@ -12,12 +12,23 @@ interface Props {
 }
 
 export function PairingErrorView({ reason, onRepair }: Props) {
-  const errorMessage =
-    reason === 'token-mismatch'
-      ? t('pairingError.tokenMismatch')
-      : reason === 'expired'
-        ? t('pairingError.tokenMismatch')
-        : t('pairingError.connectionFailed')
+  // IG4: each PairingRejectReason variant now has its own translation key.
+  // 'replaced' → "다른 기기에서 연결됨" (was incorrectly showing tokenMismatch UX)
+  // 'expired'  → dedicated expiry message (was also incorrectly showing tokenMismatch)
+  let errorMessage: string
+  switch (reason) {
+    case 'token-mismatch':
+      errorMessage = t('pairingError.tokenMismatch')
+      break
+    case 'replaced':
+      errorMessage = t('pairingError.replaced')
+      break
+    case 'expired':
+      errorMessage = t('pairingError.expired')
+      break
+    default:
+      errorMessage = t('pairingError.connectionFailed')
+  }
 
   return (
     <main className={styles.container}>
