@@ -42,20 +42,46 @@ impl Config {
     }
 
     /// Loads config from an explicit path (useful for tests).
+    ///
+    /// IG7 fix (P2 — diagnosis.md §Group7): uses single-syscall pattern:
+    ///   open(O_NOFOLLOW) → fstat → assert mode → read_to_string
+    /// This closes the TOCTOU window between `assert_secret_file_mode`
+    /// (which calls fs::metadata) and the subsequent `read_to_string` call.
+    /// CWE-367 mitigation: the mode check and read happen on the same fd.
     pub fn load_from(path: &Path) -> Result<Self> {
-        // Reject symlinks.
-        let meta = std::fs::symlink_metadata(path)
-            .with_context(|| format!("stat {path:?}"))?;
-        if meta.file_type().is_symlink() {
-            anyhow::bail!("refusing symlink at config path {path:?}");
+        use std::io::Read;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        // Open with O_NOFOLLOW: fails if `path` is a symlink (ELOOP on macOS/Linux).
+        // This replaces the separate symlink_metadata() + read_to_string() split.
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            // O_NOFOLLOW: reject symlink at the final component.
+            // POSIX value 0x20000 (macOS) / 0x20000 (Linux) — nix constant safe.
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+            .with_context(|| format!("open (O_NOFOLLOW) {path:?} — may be a symlink"))?;
+
+        // fstat on the open fd — same fd as the subsequent read (no TOCTOU window).
+        let metadata = file.metadata()
+            .with_context(|| format!("fstat {path:?}"))?;
+
+        // Assert mode 0600 on the already-open fd.
+        {
+            use std::os::unix::fs::MetadataExt;
+            let mode = metadata.mode() & 0o777;
+            if mode != 0o600 {
+                anyhow::bail!(
+                    "unexpected permissions on {path:?}: {mode:04o} (expected 0600); \
+                     possible tamper — refusing to proceed"
+                );
+            }
         }
 
-        // Assert mode 0600.
-        paths::assert_secret_file_mode(path)
-            .with_context(|| format!("check mode {path:?}"))?;
-
-        let content = std::fs::read_to_string(path)
+        let mut content = String::new();
+        file.read_to_string(&mut content)
             .with_context(|| format!("read {path:?}"))?;
+
         let cfg: Config = toml::from_str(&content)
             .with_context(|| format!("parse TOML {path:?}"))?;
 

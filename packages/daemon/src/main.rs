@@ -34,6 +34,20 @@ use cli::{Cli, Commands};
 
 #[tokio::main]
 async fn main() {
+    // IG7 fix (P1, coupled with IG3): set process umask to 0o077 so that ALL
+    // files created by this process (daemon.log, PID, sock, tmp cloudflared
+    // extract, etc.) default to at most mode 0o600 (rw-------).
+    //
+    // nix::sys::stat::umask is safe Rust — no unsafe block needed.
+    // This satisfies Q-Sec-3 (file mode confidentiality) + IG3 log-mode coupling.
+    {
+        use nix::sys::stat::{umask, Mode};
+        // 0o077 masks group and other read/write/execute bits.
+        // Pattern-wide: grep -rn "OpenOptions\|File::create" daemon/src
+        // verifies all callsites rely on this umask OR use write_secret_file.
+        umask(Mode::from_bits_truncate(0o077));
+    }
+
     let cli = Cli::parse();
 
     // Init logging early (best-effort — log dir may not exist yet for `init`).

@@ -55,10 +55,11 @@ pub fn install_hook() -> Result<()> {
     }
 
     let (mut json, existed) = if path.exists() {
-        // Reject symlink.
-        reject_symlink(&path)?;
-        let raw = std::fs::read_to_string(&path)
-            .with_context(|| format!("read {path:?}"))?;
+        // IG7 fix (P2): open with O_NOFOLLOW to close the TOCTOU window between
+        // the symlink check and the subsequent read.  The single-syscall pattern
+        // (open with O_NOFOLLOW → read) replaces separate reject_symlink() +
+        // read_to_string() calls.
+        let raw = read_no_follow(&path)?;
         let v: Value = serde_json::from_str(&raw)
             .with_context(|| format!("parse JSON {path:?}"))?;
         (v, true)
@@ -94,10 +95,9 @@ pub fn uninstall_hook() -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    reject_symlink(&path)?;
 
-    let raw = std::fs::read_to_string(&path)
-        .with_context(|| format!("read {path:?}"))?;
+    // IG7 fix: same O_NOFOLLOW single-syscall pattern.
+    let raw = read_no_follow(&path)?;
     let mut json: Value = serde_json::from_str(&raw)
         .with_context(|| format!("parse JSON {path:?}"))?;
 
@@ -118,12 +118,25 @@ pub fn uninstall_hook() -> Result<()> {
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
-fn reject_symlink(path: &std::path::Path) -> Result<()> {
-    let meta = std::fs::symlink_metadata(path)?;
-    if meta.file_type().is_symlink() {
-        anyhow::bail!("refusing symlink at {path:?} — possible tamper");
-    }
-    Ok(())
+/// Opens a file with O_NOFOLLOW and reads its content.
+///
+/// IG7 fix (P2): single-syscall pattern that rejects symlinks at the OS level
+/// and reads on the same fd — eliminates the TOCTOU window between
+/// reject_symlink() + read_to_string().
+fn read_no_follow(path: &std::path::Path) -> Result<String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut f = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .with_context(|| format!("open (O_NOFOLLOW) {path:?} — may be a symlink"))?;
+
+    let mut content = String::new();
+    f.read_to_string(&mut content)
+        .with_context(|| format!("read {path:?}"))?;
+    Ok(content)
 }
 
 /// Returns `true` if our hook command already exists in `PreToolUse`.

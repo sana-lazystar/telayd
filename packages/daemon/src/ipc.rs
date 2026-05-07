@@ -89,6 +89,10 @@ fn is_valid_tool_use_id(s: &str) -> bool {
 
 impl HookPayload {
     /// Validates field values against the security whitelist rules.
+    ///
+    /// IG6/IG7 fix (diagnosis.md §Group6 P3, §Group7):
+    /// - `cwd` field: capped at 4096 bytes; must be an absolute path; must not
+    ///   contain `..` path components (defense against path-traversal).
     pub fn validate(&self) -> Result<()> {
         if !is_valid_session_id(&self.session_id) {
             anyhow::bail!("invalid session_id format");
@@ -124,6 +128,24 @@ impl HookPayload {
                 }
             }
         }
+
+        // IG6/IG7 fix: validate `cwd` — cap + absolute + no `..` components.
+        if let Some(cwd) = &self.cwd {
+            if cwd.len() > 4096 {
+                anyhow::bail!("cwd exceeds 4096-byte cap");
+            }
+            use std::path::Path;
+            let p = Path::new(cwd.as_str());
+            if !p.is_absolute() {
+                anyhow::bail!("cwd must be an absolute path, got: {:?}", cwd);
+            }
+            for component in p.components() {
+                if component == std::path::Component::ParentDir {
+                    anyhow::bail!("cwd must not contain '..' component: {:?}", cwd);
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -235,8 +257,20 @@ async fn handle_connection(
     tx: mpsc::Sender<Inquiry>,
     tmux_session: String,
 ) -> Result<()> {
-    // Read up to MAX_PAYLOAD_BYTES+1 bytes, stopping at newline (DoS guard).
-    let mut reader = BufReader::new(stream);
+    // IG7 fix (P1): wrap stream in take() BEFORE read_until to bound memory.
+    //
+    // Without take(), `BufReader::read_until(b'\n', …)` reads until EOF on a
+    // newline-less stream — a same-UID process can OOM the daemon by writing 1 GB.
+    //
+    // `take(MAX_PAYLOAD_BYTES + 1)` limits the OS read to 256 KiB + 1 byte.
+    // If a full 256 KiB is read without encountering `\n`, the line buffer will
+    // have exactly MAX_PAYLOAD_BYTES + 1 bytes after the take exhausts, and we
+    // reject below.
+    //
+    // Wire contract (architecture.md §3.2): hook script sends a single
+    // newline-terminated JSON line.  Multi-line streams are rejected with a
+    // friendly log.
+    let mut reader = BufReader::with_capacity(64 * 1024, stream.take(MAX_PAYLOAD_BYTES + 1));
     let mut line = Vec::with_capacity(8192);
 
     reader
@@ -244,7 +278,13 @@ async fn handle_connection(
         .await
         .context("read IPC line")?;
 
+    // IG7 fix: check length AFTER bounded read.
     if line.len() as u64 > MAX_PAYLOAD_BYTES {
+        warn!(
+            target: "ipc",
+            len = line.len(),
+            "IPC payload exceeds 256 KiB limit — rejected (DoS guard)"
+        );
         anyhow::bail!("IPC payload exceeds 256 KiB limit");
     }
 
