@@ -3,6 +3,7 @@
  * Monospace rendering, textContent only (no innerHTML — security)
  */
 
+import { t } from '../lib/i18n'
 import type { InquiryPushPayload } from '../lib/protocol'
 import styles from './PromptContextBlock.module.css'
 
@@ -32,8 +33,11 @@ export function PromptContextBlock({ inquiry, showMultiSelectWarning }: Props) {
           {/* textContent only — no dangerouslySetInnerHTML */}
           <p className={styles.questionText}>{question.question}</p>
           {showMultiSelectWarning && (
+            // IG10: explicit guidance — user must know to respond in mac terminal manually
             <p className={styles.warning} role="alert">
-              복수 선택 질문은 수동으로 응답해주세요
+              {t('choice.multiSelectWarning')}
+              <br />
+              {t('choice.multiSelectGuidance')}
             </p>
           )}
         </div>

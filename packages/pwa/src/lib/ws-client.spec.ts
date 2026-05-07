@@ -99,9 +99,10 @@ describe('WsClient', () => {
 
     mockWs?.serverClose(4001)
     expect(client.status).toBe('pairing-error')
-    // Ensure no reconnect timer fires
+    // IG10: onStatusChange now called with (status, event) — check no reconnecting call
     vi.advanceTimersByTime(10_000)
-    expect(onStatusChange).not.toHaveBeenCalledWith('reconnecting')
+    const statuses = onStatusChange.mock.calls.map((c) => c[0] as string)
+    expect(statuses).not.toContain('reconnecting')
   })
 
   // IG2: 4002 should set pairing-error, NOT reconnect
@@ -114,7 +115,8 @@ describe('WsClient', () => {
     mockWs?.serverClose(4002)
     expect(client.status).toBe('pairing-error')
     vi.advanceTimersByTime(10_000)
-    expect(onStatusChange).not.toHaveBeenCalledWith('reconnecting')
+    const statuses = onStatusChange.mock.calls.map((c) => c[0] as string)
+    expect(statuses).not.toContain('reconnecting')
   })
 
   // IG3: 4003 should set 'disconnected', not cast as WsStatus
@@ -126,7 +128,11 @@ describe('WsClient', () => {
 
     mockWs?.serverClose(4003)
     expect(client.status).toBe('disconnected')
-    expect(onStatusChange).toHaveBeenCalledWith('disconnected')
+    // IG10: onStatusChange now receives (status, StatusChangeEvent)
+    expect(onStatusChange).toHaveBeenCalledWith(
+      'disconnected',
+      expect.objectContaining({ status: 'disconnected' }),
+    )
   })
 
   // IG3: unplanned close (1006) schedules reconnect

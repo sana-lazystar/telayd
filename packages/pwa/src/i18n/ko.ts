@@ -73,6 +73,8 @@ export const ko = {
       validation: '잘못된 응답 형식입니다.',
     },
     multiSelectWarning: '복수 선택 질문은 수동으로 응답해주세요',
+    // IG10: explicit guidance text shown in PromptContextBlock when showMultiSelectWarning is true
+    multiSelectGuidance: '이 prompt는 mac CLI에서 직접 응답해주세요 (다중 선택 미지원).',
   },
 
   // Permission mode

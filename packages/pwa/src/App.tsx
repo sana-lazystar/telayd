@@ -13,7 +13,7 @@ import type {
 } from './lib/protocol'
 import type { InquiryPushPayload } from './lib/protocol'
 import { wsClient } from './lib/ws-client'
-import type { WsStatus } from './lib/ws-client'
+import type { StatusChangeEvent, WsStatus } from './lib/ws-client'
 import { appReducer, initialState } from './state/app-state'
 import type { AppAction } from './state/app-state'
 import { ConnectingView } from './views/ConnectingView'
@@ -28,7 +28,8 @@ export function App() {
   const [state, dispatch] = useReducer(appReducer, initialState)
 
   // Wire WsClient callbacks → app state dispatch
-  const handleStatusChange = useCallback((status: WsStatus) => {
+  // IG10: receives (status, event) tuple; _event available for future instrumentation
+  const handleStatusChange = useCallback((status: WsStatus, _event: StatusChangeEvent) => {
     switch (status) {
       case 'reconnecting':
         dispatch({ type: 'WS_RECONNECTING', attempt: wsClient.getReconnectAttempt() })

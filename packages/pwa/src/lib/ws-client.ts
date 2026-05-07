@@ -34,8 +34,33 @@ export type WsStatus =
   | 'disconnected'
   | 'pairing-error'
 
+/**
+ * IG10: status change event including a timestamp for reconnect latency measurement.
+ * Callers can cross-reference localStorage reconnectLog with daemon log timestamps (K8 KPI).
+ */
+export interface StatusChangeEvent {
+  status: WsStatus
+  timestamp: number // Date.now() ms
+}
+
+/** Rolling reconnect log entry stored in localStorage (IG10 K8 dogfooding measurement) */
+const RECONNECT_LOG_KEY = 'telayd:reconnectLog'
+const RECONNECT_LOG_MAX = 50
+
+function appendReconnectLog(event: StatusChangeEvent): void {
+  try {
+    const raw = localStorage.getItem(RECONNECT_LOG_KEY)
+    const log: StatusChangeEvent[] = raw ? (JSON.parse(raw) as StatusChangeEvent[]) : []
+    log.push(event)
+    if (log.length > RECONNECT_LOG_MAX) log.splice(0, log.length - RECONNECT_LOG_MAX)
+    localStorage.setItem(RECONNECT_LOG_KEY, JSON.stringify(log))
+  } catch {
+    // localStorage unavailable — fail silently
+  }
+}
+
 export interface WsClientCallbacks {
-  onStatusChange?: (status: WsStatus) => void
+  onStatusChange?: (status: WsStatus, event: StatusChangeEvent) => void
   onPairingAck?: (payload: PairingAckPayload) => void
   onPairingReject?: (payload: PairingRejectPayload) => void
   onInquiryPush?: (payload: InquiryPushPayload) => void
@@ -353,7 +378,13 @@ export class WsClient {
   private _setStatus(status: WsStatus): void {
     if (this._status !== status) {
       this._status = status
-      this._callbacks.onStatusChange?.(status)
+      // IG10: emit (status, timestamp) tuple for reconnect latency measurement (K8 KPI)
+      const event: StatusChangeEvent = { status, timestamp: Date.now() }
+      // Log reconnecting/disconnected events for dogfooding cross-reference with daemon log
+      if (status === 'reconnecting' || status === 'disconnected') {
+        appendReconnectLog(event)
+      }
+      this._callbacks.onStatusChange?.(status, event)
     }
   }
 }
