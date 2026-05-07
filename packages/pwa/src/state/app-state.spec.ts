@@ -114,4 +114,26 @@ describe('appReducer', () => {
     const state = appReducer(initialState, { type: 'UNKNOWN_ACTION' } as unknown as AppAction)
     expect(state).toBe(initialState)
   })
+
+  // IG2: INQUIRY_PUSH from permission-mode page sets pendingModeAbandoned
+  it('INQUIRY_PUSH from permission-mode page → sets pendingModeAbandoned (IG2)', () => {
+    const inModeToggle: AppState = { ...initialState, page: 'permission-mode' }
+    const state = appReducer(inModeToggle, { type: 'INQUIRY_PUSH', payload: MOCK_INQUIRY })
+    expect(state.page).toBe('prompt-choice')
+    expect(state.pendingModeAbandoned).toBe(true)
+  })
+
+  // IG2: INQUIRY_PUSH from other pages does NOT set pendingModeAbandoned
+  it('INQUIRY_PUSH from idle page → pendingModeAbandoned stays false (IG2)', () => {
+    const idle: AppState = { ...initialState, page: 'idle' }
+    const state = appReducer(idle, { type: 'INQUIRY_PUSH', payload: MOCK_INQUIRY })
+    expect(state.pendingModeAbandoned).toBe(false)
+  })
+
+  // IG2: CLEAR_MODE_ABANDONED clears the flag
+  it('CLEAR_MODE_ABANDONED → pendingModeAbandoned set to false (IG2)', () => {
+    const withFlag: AppState = { ...initialState, pendingModeAbandoned: true }
+    const state = appReducer(withFlag, { type: 'CLEAR_MODE_ABANDONED' })
+    expect(state.pendingModeAbandoned).toBe(false)
+  })
 })

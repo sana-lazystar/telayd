@@ -31,6 +31,11 @@ export interface AppState {
   sessionId: string | null
   /** Server version */
   serverVersion: string | null
+  /**
+   * IG2: set to true when INQUIRY_PUSH arrives while permission-mode toggle was in-flight.
+   * PromptChoiceView reads this flag to surface a transient toast, then clears it.
+   */
+  pendingModeAbandoned: boolean
 }
 
 const initialState: AppState = {
@@ -42,6 +47,7 @@ const initialState: AppState = {
   pairingErrorReason: null,
   sessionId: null,
   serverVersion: null,
+  pendingModeAbandoned: false,
 }
 
 export type AppAction =
@@ -57,6 +63,8 @@ export type AppAction =
   | { type: 'WS_RECONNECTING'; attempt: number }
   | { type: 'WS_TIMEOUT' }
   | { type: 'RESET_TO_PAIRING' }
+  /** IG2: dismiss the pendingModeAbandoned toast after it has been shown */
+  | { type: 'CLEAR_MODE_ABANDONED' }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -81,10 +89,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }
 
     case 'INQUIRY_PUSH':
+      // IG2: if a mode toggle was in-flight (page was 'permission-mode'), surface a toast
+      // so the user knows their in-progress toggle was abandoned by the arriving prompt.
       return {
         ...state,
         page: 'prompt-choice',
         activeInquiry: action.payload,
+        pendingModeAbandoned: state.page === 'permission-mode',
       }
 
     case 'INQUIRY_RESOLVED':
@@ -130,6 +141,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         // preserve last URL for convenience
         tunnelUrl: state.tunnelUrl,
       }
+
+    // IG2: clear the deferred-apply toast once PromptChoiceView has shown it
+    case 'CLEAR_MODE_ABANDONED':
+      return { ...state, pendingModeAbandoned: false }
 
     default:
       return state

@@ -149,7 +149,10 @@ export function PermissionModeView({ current, onApplied, onCancel }: Props) {
           type="button"
           className={styles.applyButton}
           onClick={handleApply}
-          disabled={isApplying || selected === current || applyState === 'applied'}
+          // IG2: removed `selected === current` from disabled predicate.
+          // User must be able to re-confirm if there is a desync (daemon mode differs from local state).
+          // Only `isApplying` and `applied` terminal state block the button.
+          disabled={isApplying || applyState === 'applied'}
           aria-busy={isApplying}
         >
           {isApplying ? t('permissionMode.applying') : t('permissionMode.applyButton')}

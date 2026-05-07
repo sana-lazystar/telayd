@@ -85,7 +85,10 @@ export const ko = {
     applying: '적용 중...',
     applied: '적용 완료',
     timeout: '응답이 없습니다. 다시 시도합니다...',
-    notSupported: '현재 모드는 변경할 수 없습니다.',
+    // IG2: rewritten — was "현재 모드는 변경할 수 없습니다." (incorrect: no-session state is deferred, not unsupported)
+    notSupported: 'Claude Code prompt가 도착하면 자동 적용됩니다',
+    // IG2: new key — shown in prompt-choice when mode toggle was in-flight on INQUIRY_PUSH
+    deferredApply: '모드 변경이 대기 중입니다. 다음 prompt에 자동 적용됩니다.',
     cancelButton: '취소',
   },
 

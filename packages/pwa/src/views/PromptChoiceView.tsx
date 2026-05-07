@@ -22,11 +22,22 @@ interface Props {
   permissionMode: PermissionMode
   onResolved: () => void
   onOpenModeToggle: () => void
+  /** IG2: true when an in-flight mode toggle was abandoned by this arriving inquiry */
+  modeAbandonedToast?: boolean
+  /** IG2: called once the toast has been shown so the flag is cleared */
+  onClearModeAbandonedToast?: () => void
 }
 
 type SendState = 'idle' | 'sending' | 'retrying' | 'error'
 
-export function PromptChoiceView({ inquiry, permissionMode, onResolved, onOpenModeToggle }: Props) {
+export function PromptChoiceView({
+  inquiry,
+  permissionMode,
+  onResolved,
+  onOpenModeToggle,
+  modeAbandonedToast,
+  onClearModeAbandonedToast,
+}: Props) {
   const question = inquiry.questions[0]
   const isMultiSelect = question?.multiSelect ?? false
   const options = question?.options ?? []
@@ -45,6 +56,15 @@ export function PromptChoiceView({ inquiry, permissionMode, onResolved, onOpenMo
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
     }
   }, [])
+
+  // IG2: auto-dismiss the mode-abandoned toast after 4s
+  useEffect(() => {
+    if (!modeAbandonedToast) return
+    const id = setTimeout(() => {
+      onClearModeAbandonedToast?.()
+    }, 4_000)
+    return () => clearTimeout(id)
+  }, [modeAbandonedToast, onClearModeAbandonedToast])
 
   function sendResponse(payload: InquiryResponsePayload) {
     const env = makeEnvelope('inquiry-response', payload, payload.tool_use_id)
@@ -230,6 +250,13 @@ export function PromptChoiceView({ inquiry, permissionMode, onResolved, onOpenMo
             </form>
           )}
         </div>
+
+        {/* IG2: mode-abandoned transient toast */}
+        {modeAbandonedToast && (
+          <output className={styles.infoBanner}>
+            <span>{t('permissionMode.deferredApply')}</span>
+          </output>
+        )}
 
         {/* Status / error */}
         {sendState === 'error' && (

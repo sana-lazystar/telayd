@@ -15,6 +15,7 @@ import type { InquiryPushPayload } from './lib/protocol'
 import { wsClient } from './lib/ws-client'
 import type { WsStatus } from './lib/ws-client'
 import { appReducer, initialState } from './state/app-state'
+import type { AppAction } from './state/app-state'
 import { ConnectingView } from './views/ConnectingView'
 import { DisconnectedView } from './views/DisconnectedView'
 import { IdleView } from './views/IdleView'
@@ -142,6 +143,9 @@ export function App() {
           permissionMode={state.permissionMode}
           onResolved={handleInquiryResolved}
           onOpenModeToggle={handleOpenModeToggle}
+          // IG2: notify PromptChoiceView that a mode toggle was abandoned mid-flight
+          modeAbandonedToast={state.pendingModeAbandoned}
+          onClearModeAbandonedToast={() => dispatch({ type: 'CLEAR_MODE_ABANDONED' } as AppAction)}
         />
       )}
 
