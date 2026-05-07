@@ -277,29 +277,41 @@ async fn ws_upgrade_handler(
 
 /// Returns `true` if `origin` is in the WS upgrade allowlist.
 ///
-/// Allowlist rules (IG8):
+/// Allowlist rules (IG8 + L0 deployment widening):
 /// 1. `None` (absent header) → permitted — covers CLI tools and native clients.
 /// 2. `"null"` → permitted — covers `file://` origins and same-origin dev access.
-/// 3. `https://<tunnel_url>` → permitted when tunnel is established.
-/// 4. All others → rejected (HTTP 403).
+/// 3. `https://*.trycloudflare.com` (host-only, no path/query) → permitted.
+///    L0 deployment hosts the PWA on a separate trycloudflare quick tunnel
+///    from the daemon (ux-direction.md `pairing-screen` enters token + tunnel
+///    URL as two separate fields). Pairing token (32-byte base64url) is the
+///    primary auth — this Origin rule is CSRF defense only. L1 named-tunnel
+///    migration (decisions/006) tightens this to an exact `https://tunnel.telayd.dev`.
+/// 4. `https://<daemon_tunnel_url>` (exact) → permitted — preserved for future
+///    same-origin deployments where the daemon serves PWA static.
+/// 5. All others → rejected (HTTP 403).
 fn is_origin_allowed(origin: Option<&str>, tunnel_url: Option<&str>) -> bool {
     match origin {
         // No Origin header (CLI / native client) or "null" (browser file:// origin) → allow.
         None | Some("null") => true,
         Some(o) => {
-            // Allow if it matches the current tunnel URL (scheme + host only).
-            if let Some(tunnel) = tunnel_url {
-                // Strip trailing slash from both sides for robust comparison.
-                let o_norm = o.trim_end_matches('/');
-                let t_norm = tunnel.trim_end_matches('/');
-                // IG-r2-4 fix: exact equality only. The Origin header is always
-                // scheme+host (never a path), and the tunnel URL is the same.
-                // The previous `t_norm.starts_with(o_norm)` OR-branch was
-                // wider than the allowlist directive and has been removed.
-                o_norm == t_norm
-            } else {
-                false
+            let o_norm = o.trim_end_matches('/');
+
+            // (Rule 3) L0 wildcard: any *.trycloudflare.com sub-domain. Host-only
+            // (no path/query) — Origin headers never carry paths, so a value
+            // containing '/' or '?' is malformed and rejected here.
+            if let Some(host) = o_norm.strip_prefix("https://") {
+                let host_only = !host.contains('/') && !host.contains('?');
+                if host_only && host.ends_with(".trycloudflare.com") {
+                    return true;
+                }
             }
+
+            // (Rule 4) Exact match with the daemon's own tunnel URL.
+            if let Some(tunnel) = tunnel_url {
+                let t_norm = tunnel.trim_end_matches('/');
+                return o_norm == t_norm;
+            }
+            false
         }
     }
 }
@@ -963,9 +975,30 @@ mod tests {
     }
 
     #[test]
-    fn origin_does_not_match_different_tunnel() {
+    fn origin_l0_wildcard_accepts_any_trycloudflare_subdomain() {
+        // L0 deployment widening (decisions/006): PWA may be hosted on a
+        // separate trycloudflare quick tunnel from the daemon. Wildcard accepts
+        // any *.trycloudflare.com origin. Primary auth (32-byte pairing token)
+        // is intact; this widens only the CSRF surface for L0 dogfooding scope.
         let tunnel = "https://abc-def.trycloudflare.com";
-        assert!(!is_origin_allowed(Some("https://xyz.trycloudflare.com"), Some(tunnel)));
+        assert!(is_origin_allowed(
+            Some("https://xyz.trycloudflare.com"),
+            Some(tunnel)
+        ));
+        assert!(is_origin_allowed(
+            Some("https://cologne-equal-seeker-isle.trycloudflare.com"),
+            Some(tunnel)
+        ));
+        // Adversarial host-suffix probe: must NOT match a TLD lookalike.
+        assert!(!is_origin_allowed(
+            Some("https://evil-trycloudflare.com"),
+            Some(tunnel)
+        ));
+        // Path/query suffix probe: must NOT match (Origin headers are scheme+host).
+        assert!(!is_origin_allowed(
+            Some("https://attacker.com/.trycloudflare.com"),
+            Some(tunnel)
+        ));
     }
 
     #[test]
