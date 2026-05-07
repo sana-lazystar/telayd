@@ -50,17 +50,49 @@ trap 'cleanup' EXIT INT TERM
 
 TMPFILE="$(mktemp /tmp/telayd-hook-XXXXXX)"
 
-# IG9 fix (diagnosis.md §Group9 P2): replace `read -r -t 2 PAYLOAD_LINE` with
-# `timeout 2 cat -` so that multi-line (pretty-printed) JSON is read in full.
-# `head -c $((256*1024))` caps at 256 KiB before any further processing.
-# `tr -d '\n'` collapses all newlines into a single-line payload that the
-# daemon IPC parser expects (newline-terminated single-line wire format).
+# IG-r2-2 fix: replace `timeout 2 cat -` with a bash 3.2-compatible
+# `read -r -t` loop.  `timeout(1)` is a GNU coreutils binary absent on stock
+# macOS; under `set -euo pipefail` the missing command causes an immediate
+# non-zero exit before IPC emit → hook silently dies (SH-1 / B-3 regression).
 #
-# Bash 3.2 (macOS default) compatible — no bashisms, no jq dependency.
-# Failure modes:
-#   - timeout exits 124 if stdin blocks > 2s → PAYLOAD is empty → exit 0.
-#   - Any other failure propagates to the validation check below → exit 0.
-PAYLOAD="$(timeout 2 cat - | head -c $((256*1024)) | tr -d '\n')" || true
+# Strategy: read stdin line-by-line with `read -r -t 2`.
+#   - `-t 2` applies a per-read 2-second timeout (POSIX read timeout,
+#     supported on macOS bash 3.2 since bash 2.x).
+#   - First iteration: 2s budget for the initial byte (stdin from Claude Code
+#     arrives almost instantly; 2s is generous).
+#   - Subsequent iterations: 0.1s timeout so that the loop exits promptly once
+#     stdin EOF is reached (no blocking on the last line).
+#   - Accumulates into PAYLOAD_RAW (raw, possibly multi-line).
+#   - 256 KiB guard: stop accumulating once character count exceeds 262144.
+#   - `tr -d '\n'` (applied after the loop) collapses newlines → single-line
+#     wire format expected by the daemon IPC parser.
+#
+# Failure modes (all safe):
+#   - Stdin delivers 0 bytes within 2s → PAYLOAD_RAW empty → exit 0 below.
+#   - Claude Code sends compact single-line JSON → loop reads 1 line, exits.
+#   - Claude Code sends pretty-printed JSON → loop reads N lines, exits on EOF.
+#   - No GNU coreutils needed; no jq dependency.
+PAYLOAD_RAW=""
+# Read the first line with a 2s timeout (guards against hung stdin).
+# `-t 2` is supported by bash 3.2 (macOS default) — POSIX read timeout.
+_line=""
+if IFS= read -r -t 2 _line; then
+  PAYLOAD_RAW="${_line}
+"
+  # Read remaining lines without a timeout — stdin is a pipe from Claude Code
+  # so EOF arrives as soon as the JSON payload ends (no blocking).
+  # The 256 KiB guard prevents unbounded accumulation.
+  while IFS= read -r _line; do
+    PAYLOAD_RAW="${PAYLOAD_RAW}${_line}
+"
+    if [ "${#PAYLOAD_RAW}" -ge 262144 ]; then
+      break
+    fi
+  done
+fi
+
+# Collapse newlines → single-line wire format (daemon IPC expects newline-terminated line).
+PAYLOAD="$(printf '%s' "${PAYLOAD_RAW}" | tr -d '\n')" || true
 
 # Guard: empty read (daemon timeout, closed stdin, or bash 3.2 timeout) → exit 0.
 if [ -z "${PAYLOAD}" ]; then
