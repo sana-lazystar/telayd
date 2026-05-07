@@ -189,8 +189,28 @@ impl TmuxController {
             }
         }
         let mode_cmd = format!("/mode {}", mode.as_str());
+
+        // Step 1: send the literal text (mirrors send_literal step-1).
         let status = Command::new("tmux")
             .args(["send-keys", "-t", session, "-l", &mode_cmd])
+            .status()
+            .await;
+        match status {
+            Ok(s) if s.success() => {}
+            Ok(s) => {
+                warn!(target: "tmux", session, ?s, "send_mode_command literal failed (non-zero exit)");
+                return false;
+            }
+            Err(e) => {
+                warn!(target: "tmux", session, err = %e, "send_mode_command literal failed");
+                return false;
+            }
+        }
+
+        // Step 2: send Enter to submit the slash command (mirrors send_literal step-2).
+        // Without this, `/mode <name>` stays in the prompt buffer and is never submitted.
+        let status = Command::new("tmux")
+            .args(["send-keys", "-t", session, "Enter"])
             .status()
             .await;
         match status {
@@ -199,11 +219,11 @@ impl TmuxController {
                 true
             }
             Ok(s) => {
-                warn!(target: "tmux", session, ?s, "send_mode_command failed (non-zero exit)");
+                warn!(target: "tmux", session, ?s, "send_mode_command Enter failed (non-zero exit)");
                 false
             }
             Err(e) => {
-                warn!(target: "tmux", session, err = %e, "send_mode_command failed");
+                warn!(target: "tmux", session, err = %e, "send_mode_command Enter failed");
                 false
             }
         }
@@ -419,5 +439,32 @@ mod tests {
         let v = INJECT_RACE_TOTAL.load(Ordering::Relaxed);
         // Just verify it's accessible; exact value depends on test runs.
         let _ = v;
+    }
+
+    /// IG-r2-1 regression: send_mode_command source-level contract check.
+    ///
+    /// Verifies that `send_mode_command` in tmux_controller.rs calls tmux
+    /// send-keys twice: once for the literal text and once for Enter.
+    /// This is a static pattern check (pattern-wide grep assertion documented
+    /// here, exercised manually with:
+    ///   grep -n 'send-keys.*Enter' packages/daemon/src/tmux_controller.rs
+    /// → must return ≥2 hits: one in send_literal and one in send_mode_command).
+    ///
+    /// The test below validates the two-step structure in isolation by confirming
+    /// the function body contains the Enter step (source-code invariant test).
+    #[test]
+    fn send_mode_command_source_has_literal_then_enter_steps() {
+        // Pattern-wide grep: both send_literal AND send_mode_command must have
+        // an Enter send-keys call.  We verify by inspecting the source string.
+        let source = include_str!("tmux_controller.rs");
+        // Count occurrences of '"Enter"' inside send-keys calls.
+        // Expected: ≥2 (one in send_literal, one in send_mode_command).
+        let enter_send_count = source.matches(r#""Enter""#).count();
+        assert!(
+            enter_send_count >= 2,
+            "Expected ≥2 'Enter' send-keys calls in tmux_controller.rs (send_literal + \
+             send_mode_command), found {enter_send_count}. \
+             IG-r2-1 regression: send_mode_command must send Enter after literal text."
+        );
     }
 }

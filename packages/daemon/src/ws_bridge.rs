@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -78,6 +79,13 @@ pub struct WsBridgeState {
     /// Updated atomically by `cf_tunnel::run_tunnel` callback at each URL rotation.
     /// "null" is always allowed for direct-connect during local dev.
     pub tunnel_origin: Arc<RwLock<Option<String>>>,
+    /// IG-r2-1 fix: tracks whether a mode-toggle needs to be replayed on the
+    /// next inquiry-push.  Set to `true` when `apply_permission_mode` returns
+    /// `(false, "no-session")` (deferred because no tmux session was available).
+    /// Cleared to `false` after the mode command is successfully sent in
+    /// `push_inquiry`.  Prevents the unconditional-replay regression introduced
+    /// by round-1 IG2.
+    needs_mode_replay: AtomicBool,
 }
 
 impl WsBridgeState {
@@ -95,6 +103,7 @@ impl WsBridgeState {
             metrics,
             permission_mode: Mutex::new(PermissionMode::Default),
             tunnel_origin: Arc::new(RwLock::new(None)),
+            needs_mode_replay: AtomicBool::new(false),
         })
     }
 
@@ -181,27 +190,25 @@ const SHUTDOWN_SENTINEL: &str = "__TELAYD_SHUTDOWN_4003__";
 /// (or any mode toggle was deferred), replay `apply_permission_mode` once so that
 /// idle-state toggles take effect on the first inquiry after the toggle.
 pub async fn push_inquiry(state: &Arc<WsBridgeState>, inquiry: Inquiry) -> Result<()> {
-    // IG2 fix: replay deferred mode toggle on inquiry arrival.
-    // Only send the mode command if we have an active session to target.
-    {
+    // IG-r2-1 fix: replay a deferred mode toggle ONLY when needs_mode_replay is set.
+    // The flag is set by apply_permission_mode when no tmux session was available
+    // at toggle time (applied=false, "no-session").  Without this gate, every
+    // inquiry arrival would unconditionally call send_mode_command, causing
+    // `/mode <name>` text to stack in the prompt buffer (BLOCKER-2 regression).
+    if state.needs_mode_replay.load(Ordering::Acquire) {
         let current_mode = state.permission_mode.lock().await.clone();
-        // Use the inquiry's tmux_session as the target for mode replay.
         let sess = inquiry.tmux_session.clone();
         if !sess.is_empty() {
-            // Check whether the session is registered — if so, apply mode idempotently.
-            if state.tmux.first_active_session().is_some() {
-                // Idempotent replay: apply the current stored mode to this session.
-                // This ensures that a deferred toggle (applied=false due to no-session)
-                // takes effect when the next inquiry arrives.
-                let mode_applied = state.tmux.send_mode_command(&sess, &current_mode).await;
-                if mode_applied {
-                    debug!(
-                        target: "ws_bridge",
-                        tmux_session = %sess,
-                        mode = ?current_mode,
-                        "replayed deferred permission mode on inquiry-push"
-                    );
-                }
+            let mode_applied = state.tmux.send_mode_command(&sess, &current_mode).await;
+            if mode_applied {
+                // Clear the replay flag only on successful delivery.
+                state.needs_mode_replay.store(false, Ordering::Release);
+                debug!(
+                    target: "ws_bridge",
+                    tmux_session = %sess,
+                    mode = ?current_mode,
+                    "replayed deferred permission mode on inquiry-push"
+                );
             }
         }
     }
@@ -285,10 +292,11 @@ fn is_origin_allowed(origin: Option<&str>, tunnel_url: Option<&str>) -> bool {
                 // Strip trailing slash from both sides for robust comparison.
                 let o_norm = o.trim_end_matches('/');
                 let t_norm = tunnel.trim_end_matches('/');
-                // The tunnel URL may contain a path; the Origin header never
-                // contains a path component — compare scheme+host only.
-                // If the tunnel URL starts with the origin value, it matches.
-                o_norm == t_norm || t_norm.starts_with(o_norm)
+                // IG-r2-4 fix: exact equality only. The Origin header is always
+                // scheme+host (never a path), and the tunnel URL is the same.
+                // The previous `t_norm.starts_with(o_norm)` OR-branch was
+                // wider than the allowlist directive and has been removed.
+                o_norm == t_norm
             } else {
                 false
             }
@@ -869,9 +877,18 @@ async fn apply_permission_mode(mode: &PermissionMode, state: &Arc<WsBridgeState>
 
     if let Some(sess) = session {
         let applied = state.tmux.send_mode_command(&sess, mode).await;
+        if applied {
+            // Successfully applied immediately — no replay needed.
+            state.needs_mode_replay.store(false, Ordering::Release);
+        } else {
+            // send_mode_command failed (e.g. session disappeared mid-flight) — schedule replay.
+            state.needs_mode_replay.store(true, Ordering::Release);
+        }
         (applied, None)
     } else {
         // No active session known — deferred apply (mode is stored, replayed on next inquiry).
+        // Set needs_mode_replay so push_inquiry will apply it when a session becomes available.
+        state.needs_mode_replay.store(true, Ordering::Release);
         warn!(target: "ws_bridge", "mode-toggle: no active session — deferring until next inquiry-push");
         (false, Some("no-session"))
     }
@@ -996,6 +1013,58 @@ mod tests {
             permission_mode: None,
             created_at: "2026-01-01T00:00:00.000Z".to_string(),
         }
+    }
+
+    /// IG-r2-1 regression: push_inquiry must NOT unconditionally call send_mode_command.
+    ///
+    /// Scenario: register a session, push two inquiries without any mode-toggle.
+    /// The `needs_mode_replay` flag starts false, so send_mode_command should
+    /// never be invoked.  We verify indirectly by confirming push_inquiry
+    /// completes without the tmux controller being called for mode (no active
+    /// client → push_inquiry drops the push but still processes the replay gate).
+    ///
+    /// This test guards against the BLOCKER-2 regression from round-1 IG2 where
+    /// push_inquiry called send_mode_command unconditionally on every inquiry.
+    #[tokio::test]
+    async fn push_inquiry_does_not_replay_mode_when_no_flag_set() {
+        let state = make_state();
+        // needs_mode_replay starts false (default) — no toggle happened.
+        assert!(!state.needs_mode_replay.load(Ordering::Acquire));
+
+        // Register a session so first_active_session() returns Some.
+        state.tmux.register_session("test-session");
+
+        // Push two inquiries — no mode-toggle, flag stays false.
+        let inq1 = make_inquiry("toolu_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA1", "test-session");
+        let inq2 = make_inquiry("toolu_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2", "test-session");
+
+        // push_inquiry will drop (no active client) but the replay gate must not fire.
+        let _ = push_inquiry(&state, inq1).await;
+        let _ = push_inquiry(&state, inq2).await;
+
+        // Flag must remain false — no deferred toggle was requested.
+        assert!(
+            !state.needs_mode_replay.load(Ordering::Acquire),
+            "needs_mode_replay must stay false when no mode-toggle was requested"
+        );
+    }
+
+    /// IG-r2-1 regression: after a deferred mode-toggle (no session at toggle time),
+    /// needs_mode_replay must be set to true so the next inquiry triggers replay.
+    #[tokio::test]
+    async fn deferred_mode_toggle_sets_replay_flag() {
+        let state = make_state();
+
+        // No session registered → apply_permission_mode returns (false, "no-session").
+        let (applied, reason) = apply_permission_mode(&PermissionMode::Default, &state).await;
+        assert!(!applied);
+        assert_eq!(reason, Some("no-session"));
+
+        // Flag must be set for replay on next inquiry.
+        assert!(
+            state.needs_mode_replay.load(Ordering::Acquire),
+            "needs_mode_replay must be true after deferred (no-session) mode toggle"
+        );
     }
 
     #[test]
