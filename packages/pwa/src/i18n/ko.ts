@@ -56,6 +56,8 @@ export const ko = {
 
   // Choice screen
   choice: {
+    // IG11: was hardcoded "Claude Code 질문" in JSX — now i18n key
+    headerTitle: 'Claude Code 질문',
     headerPrefix: '',
     sendButton: '전송',
     sending: '전송 중...',

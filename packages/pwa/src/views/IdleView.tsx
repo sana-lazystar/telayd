@@ -7,6 +7,13 @@ import { t } from '../lib/i18n'
 import type { PermissionMode } from '../lib/protocol'
 import styles from './IdleView.module.css'
 
+// IG11: literal class map — replaces fragile string-mangled `.replace('-', '')` lookup
+const MODE_BADGE_CLASS: Record<PermissionMode, string> = {
+  plan: styles['modeBadge--plan'],
+  'accept-edits': styles['modeBadge--acceptedits'],
+  default: styles['modeBadge--default'],
+}
+
 interface Props {
   permissionMode: PermissionMode
   serverVersion?: string
@@ -28,9 +35,7 @@ export function IdleView({ permissionMode, serverVersion, onOpenModeToggle }: Pr
           onClick={onOpenModeToggle}
           aria-label={`${t('idle.mode')}: ${permissionMode}. ${t('idle.changeMode')}`}
         >
-          <span
-            className={`${styles.modeBadge} ${styles[`modeBadge--${permissionMode.replace('-', '')}`]}`}
-          >
+          <span className={`${styles.modeBadge} ${MODE_BADGE_CLASS[permissionMode]}`}>
             {t(`modeLabel.${permissionMode as 'plan' | 'accept-edits' | 'default'}`)}
           </span>
         </button>

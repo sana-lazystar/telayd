@@ -271,4 +271,23 @@ describe('WsClient', () => {
     mockWs?.receive(JSON.stringify(bad))
     expect(onInquiryPush).not.toHaveBeenCalled()
   })
+
+  // IG11: narrowInquiryPushPayload rejects empty questions array
+  it('inquiry-push with empty questions array is dropped (IG11)', () => {
+    const client = makeClient()
+    connectAndPair(client)
+    const onInquiryPush = vi.fn()
+    client.setCallbacks({ onInquiryPush })
+
+    const bad = makeEnvelope('inquiry-push', {
+      tool_use_id: 'toolu_01',
+      session_id: 'sess-01',
+      tmux_session: 'tmux-01',
+      header: 'H',
+      questions: [],
+      created_at: new Date().toISOString(),
+    })
+    mockWs?.receive(JSON.stringify(bad))
+    expect(onInquiryPush).not.toHaveBeenCalled()
+  })
 })

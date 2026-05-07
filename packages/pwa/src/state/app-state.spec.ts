@@ -102,11 +102,12 @@ describe('appReducer', () => {
     expect(state.pairingErrorReason).toBe('timeout')
   })
 
-  it('RESET_TO_PAIRING → initial state (preserves tunnelUrl)', () => {
+  // IG11: RESET_TO_PAIRING no longer preserves tunnelUrl (PairingForm reads localStorage)
+  it('RESET_TO_PAIRING → full initial state (tunnelUrl reset, IG11)', () => {
     const withUrl: AppState = { ...initialState, page: 'idle', tunnelUrl: 'wss://kept.com' }
     const state = appReducer(withUrl, { type: 'RESET_TO_PAIRING' })
     expect(state.page).toBe('pairing')
-    expect(state.tunnelUrl).toBe('wss://kept.com')
+    expect(state.tunnelUrl).toBe('')
   })
 
   it('unknown action returns state unchanged', () => {

@@ -93,8 +93,12 @@ function narrowInquiryPushPayload(payload: unknown): InquiryPushPayload | null {
   ) {
     return null
   }
-  // Validate questions array shape (at least check first item if present)
+  // IG11: defense-in-depth — architecture.md §2.3 mandates 1..4 questions.
+  // An empty array would silently render a blank PromptChoiceView; >4 is protocol drift.
   const questions = p.questions as unknown[]
+  if (questions.length < 1 || questions.length > 4) return null
+
+  // Validate questions array shape
   for (const q of questions) {
     if (typeof q !== 'object' || q === null) return null
     const qi = q as Record<string, unknown>

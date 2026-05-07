@@ -3,7 +3,9 @@
  * Token mismatch or connection timeout
  */
 
+import { useEffect } from 'react'
 import { t } from '../lib/i18n'
+import { clearStorage } from '../lib/storage'
 import styles from './PairingErrorView.module.css'
 
 interface Props {
@@ -12,6 +14,11 @@ interface Props {
 }
 
 export function PairingErrorView({ reason, onRepair }: Props) {
+  // IG11: clear stale localStorage on pairing error mount so PairingForm starts fresh
+  useEffect(() => {
+    clearStorage()
+  }, [])
+
   // IG4: each PairingRejectReason variant now has its own translation key.
   // 'replaced' → "다른 기기에서 연결됨" (was incorrectly showing tokenMismatch UX)
   // 'expired'  → dedicated expiry message (was also incorrectly showing tokenMismatch)

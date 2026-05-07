@@ -1,10 +1,27 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import type { Plugin } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
+
+/**
+ * IG11: strip ws://localhost:7777 from the CSP connect-src in production builds.
+ * The dev server serves to localhost where the daemon is reachable directly;
+ * production traffic always goes through the cloudflared wss:// tunnel only.
+ */
+function stripLocalWsFromCsp(): Plugin {
+  return {
+    name: 'strip-local-ws-csp',
+    apply: 'build',
+    transformIndexHtml(html) {
+      return html.replace(/ ws:\/\/localhost:7777/g, '')
+    },
+  }
+}
 
 export default defineConfig({
   plugins: [
     react(),
+    stripLocalWsFromCsp(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],

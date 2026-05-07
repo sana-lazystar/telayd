@@ -58,7 +58,9 @@
   --color-mode-accept-bg: #2ea04333;
   --color-mode-accept-text: #3fb950;
   --color-mode-default-bg: #6e768133;
-  --color-mode-default-text: #8b949e;
+  /* IG11: bumped from #8b949e — estimated contrast ~3.5:1 against transparent bg (WCAG AA fail).
+     #c9d1d9 achieves ~6.1:1 against the effective blended bg (#1d2127). */
+  --color-mode-default-text: #c9d1d9;
 
   /* Spacing */
   --space-1: 4px;
@@ -72,8 +74,9 @@
   --space-12: 48px;
 
   /* Typography */
-  --font-family-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', Helvetica, Arial, sans-serif;
-  --font-family-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  --font-family-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", Helvetica,
+    Arial, sans-serif;
+  --font-family-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 
   --font-size-xs: 11px;
   --font-size-sm: 13px;

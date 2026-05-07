@@ -16,7 +16,7 @@ export function PromptContextBlock({ inquiry, showMultiSelectWarning }: Props) {
   const question = inquiry.questions[0]
 
   return (
-    <section className={styles.contextBlock} aria-label="Claude Code 질문">
+    <section className={styles.contextBlock} aria-label={t('choice.headerTitle')}>
       {/* Header */}
       {inquiry.header && (
         <div className={styles.header}>

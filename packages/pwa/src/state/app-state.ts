@@ -136,11 +136,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }
 
     case 'RESET_TO_PAIRING':
-      return {
-        ...initialState,
-        // preserve last URL for convenience
-        tunnelUrl: state.tunnelUrl,
-      }
+      // IG11: drop tunnelUrl preservation — PairingForm reads lastUrl from localStorage
+      // directly via loadLastUrl(), so state.tunnelUrl is redundant here.
+      return { ...initialState }
 
     // IG2: clear the deferred-apply toast once PromptChoiceView has shown it
     case 'CLEAR_MODE_ABANDONED':

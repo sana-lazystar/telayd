@@ -17,6 +17,16 @@ import styles from './PromptChoiceView.module.css'
 const RESPONSE_TIMEOUT_MS = 5_000
 const MAX_FREE_TEXT_LENGTH = 4096
 
+// IG11: literal class map replacing fragile string-mangled lookup.
+// `replace('-', '')` only stripped the first hyphen so 'accept-edits' → 'acceptedits';
+// a future mode like 'auto-accept-all' would silently collide.
+// CSS Module bracket notation used for BEM modifier names containing '--'.
+const MODE_BADGE_CLASS: Record<PermissionMode, string> = {
+  plan: styles['modeBadge--plan'],
+  'accept-edits': styles['modeBadge--acceptedits'],
+  default: styles['modeBadge--default'],
+}
+
 interface Props {
   inquiry: InquiryPushPayload
   permissionMode: PermissionMode
@@ -162,16 +172,14 @@ export function PromptChoiceView({
     <main className={styles.container}>
       {/* Header bar with mode indicator */}
       <header className={styles.header}>
-        <h2 className={styles.headerTitle}>Claude Code 질문</h2>
+        <h2 className={styles.headerTitle}>{t('choice.headerTitle')}</h2>
         <button
           type="button"
           className={styles.modeButton}
           onClick={onOpenModeToggle}
           aria-label={`현재 모드: ${permissionMode}. 변경하려면 클릭`}
         >
-          <span
-            className={`${styles.modeBadge} ${styles[`modeBadge--${permissionMode.replace('-', '')}`]}`}
-          >
+          <span className={`${styles.modeBadge} ${MODE_BADGE_CLASS[permissionMode]}`}>
             {t(`modeLabel.${permissionMode as 'plan' | 'accept-edits' | 'default'}`)}
           </span>
         </button>

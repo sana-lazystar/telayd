@@ -12,6 +12,7 @@ import type {
   PermissionMode,
 } from './lib/protocol'
 import type { InquiryPushPayload } from './lib/protocol'
+import { clearStorage } from './lib/storage'
 import { wsClient } from './lib/ws-client'
 import type { StatusChangeEvent, WsStatus } from './lib/ws-client'
 import { appReducer, initialState } from './state/app-state'
@@ -119,6 +120,8 @@ export function App() {
 
   function handleRepair() {
     wsClient.disconnect()
+    // IG11: clearStorage on repair — flush stale lastUrl/masked-token so user starts fresh
+    clearStorage()
     dispatch({ type: 'RESET_TO_PAIRING' })
   }
 
