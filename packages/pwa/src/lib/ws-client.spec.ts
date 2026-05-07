@@ -200,6 +200,54 @@ describe('WsClient', () => {
     expect(onPairingReject).not.toHaveBeenCalledWith({ reason: 'token-mismatch' })
   })
 
+  // IG5: subscribeModeAck routes mode-toggle-ack to registered handler
+  it('subscribeModeAck routes mode-toggle-ack to handler (IG5)', () => {
+    const client = makeClient()
+    connectAndPair(client)
+
+    const handler = vi.fn()
+    client.subscribeModeAck(handler)
+
+    const ack = makeEnvelope('mode-toggle-ack', { mode: 'plan', applied: true })
+    mockWs?.receive(JSON.stringify(ack))
+
+    expect(handler).toHaveBeenCalledWith({ mode: 'plan', applied: true })
+  })
+
+  // IG5: subscribeModeAck returns unsubscribe — after unsubscribe, handler not called
+  it('subscribeModeAck unsubscribe prevents stale-handler invocation (IG5)', () => {
+    const client = makeClient()
+    connectAndPair(client)
+
+    const handler = vi.fn()
+    const unsubscribe = client.subscribeModeAck(handler)
+    unsubscribe()
+
+    const ack = makeEnvelope('mode-toggle-ack', { mode: 'plan', applied: true })
+    mockWs?.receive(JSON.stringify(ack))
+
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  // IG5: rapid re-subscription — only the latest handler is active
+  it('rapid subscribeModeAck re-subscription — only one handler active at a time (IG5)', () => {
+    const client = makeClient()
+    connectAndPair(client)
+
+    const handler1 = vi.fn()
+    const handler2 = vi.fn()
+    const unsub1 = client.subscribeModeAck(handler1)
+    // Simulate component re-render: unsub previous, sub new
+    unsub1()
+    client.subscribeModeAck(handler2)
+
+    const ack = makeEnvelope('mode-toggle-ack', { mode: 'accept-edits', applied: false })
+    mockWs?.receive(JSON.stringify(ack))
+
+    expect(handler1).not.toHaveBeenCalled()
+    expect(handler2).toHaveBeenCalledTimes(1)
+  })
+
   // IG1: per-type narrowing — invalid inquiry-push payload is silently dropped
   it('inquiry-push with missing session_id is silently dropped (IG1)', () => {
     const client = makeClient()

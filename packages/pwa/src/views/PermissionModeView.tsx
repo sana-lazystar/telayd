@@ -3,20 +3,23 @@
  * Anthropic #35637 정조준 — plan/accept-edits/default mode toggle
  * 5s ack timeout + retry 1회 + 사용자 알림
  *
- * Fix IG4: replaced prevCallbacks chain pattern with explicit cleanup ref.
- *   The previous pattern set callbacks inside handleApply but never restored them
- *   on rapid apply→cancel→apply cycles, accumulating stale handler chains.
+ * Fix IG5: replaced getCallbacks/setCallbacks global-swap pattern with
+ *   useEffect + wsClient.subscribeModeAck + cleanup-on-unmount.
+ *   The swap pattern caused stale-handler chains on rapid apply→cancel→apply
+ *   or any App.tsx useEffect re-fire. subscribeModeAck ensures exactly one
+ *   handler is active at a time, with identity-guarded cleanup.
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { PermissionModeToggle } from '../components/PermissionModeToggle'
 import { t } from '../lib/i18n'
 import type { ModeToggleAckPayload, PermissionMode } from '../lib/protocol'
-import { makeEnvelope } from '../lib/protocol'
 import { wsClient } from '../lib/ws-client'
 import styles from './PermissionModeView.module.css'
 
+// IG5: shorten retry inner timeout from 5s to 3s (was: 5000+5000=10s total perceived freeze)
 const ACK_TIMEOUT_MS = 5_000
+const RETRY_TIMEOUT_MS = 3_000
 
 interface Props {
   current: PermissionMode
@@ -32,68 +35,56 @@ export function PermissionModeView({ current, onApplied, onCancel }: Props) {
   const [errorMsg, setErrorMsg] = useState('')
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const retryCountRef = useRef(0)
-  // IG4: store the unsubscribe fn so we can call it before each apply + on unmount
-  const unsubscribeAckRef = useRef<(() => void) | null>(null)
+  // IG5: track the pending mode so the ack handler can re-send on retry without closure capture
+  const pendingModeRef = useRef<PermissionMode | null>(null)
 
+  // Cleanup timers on unmount — subscribeModeAck cleanup is handled in its own useEffect
   useEffect(() => {
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
-      // IG4: restore App-level onModeToggleAck on unmount
-      unsubscribeAckRef.current?.()
     }
   }, [])
 
-  function _registerAckHandler() {
-    // IG4: Clean up any prior registration before registering a new one
-    unsubscribeAckRef.current?.()
+  // IG5: Register mode-ack subscriber via dedicated API (replaces getCallbacks/setCallbacks swap).
+  // useCallback stabilises the handler identity so the useEffect dependency array is safe.
+  const handleModeAck = useCallback(
+    (ackPayload: ModeToggleAckPayload) => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+      if (ackPayload.applied) {
+        setApplyState('applied')
+        setTimeout(() => {
+          onApplied(ackPayload.mode)
+        }, 500)
+      } else {
+        setApplyState('error')
+        setErrorMsg(t('permissionMode.notSupported'))
+      }
+    },
+    [onApplied],
+  )
 
-    const prevCallbacks = wsClient.getCallbacks()
-    wsClient.setCallbacks({
-      ...prevCallbacks,
-      onModeToggleAck: (ackPayload: ModeToggleAckPayload) => {
-        if (timeoutRef.current) clearTimeout(timeoutRef.current)
-        if (ackPayload.applied) {
-          setApplyState('applied')
-          setTimeout(() => {
-            onApplied(ackPayload.mode)
-          }, 500)
-        } else {
-          setApplyState('error')
-          setErrorMsg(t('permissionMode.notSupported'))
-        }
-        // IG4: restore previous handler after first ack
-        wsClient.setCallbacks(prevCallbacks)
-        unsubscribeAckRef.current = null
-      },
-    })
+  useEffect(() => {
+    // Subscribe for the entire lifetime of this component.
+    // subscribeModeAck returns the cleanup fn — React calls it on unmount.
+    return wsClient.subscribeModeAck(handleModeAck)
+  }, [handleModeAck])
 
-    // Store cleanup fn — restores prev callbacks if called before ack fires
-    unsubscribeAckRef.current = () => {
-      wsClient.setCallbacks(prevCallbacks)
-      unsubscribeAckRef.current = null
-    }
-  }
-
-  function sendToggle(mode: PermissionMode) {
-    const env = makeEnvelope('mode-toggle-request', { mode })
-    wsClient.send(env)
-
+  function _scheduleTimeout(mode: PermissionMode) {
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
     timeoutRef.current = setTimeout(() => {
       if (retryCountRef.current < 1) {
         retryCountRef.current++
         setApplyState('retrying')
-        wsClient.send(env)
+        // Re-send using the typed helper (IG5: consistent with subscribe API)
+        wsClient.sendModeToggle(mode)
+        // IG5: shorten inner retry timeout from 5s to 3s
         timeoutRef.current = setTimeout(() => {
           setApplyState('error')
           setErrorMsg(t('permissionMode.timeout'))
-          // IG4: restore on timeout (no ack will come)
-          unsubscribeAckRef.current?.()
-        }, ACK_TIMEOUT_MS)
+        }, RETRY_TIMEOUT_MS)
       } else {
         setApplyState('error')
         setErrorMsg(t('permissionMode.timeout'))
-        unsubscribeAckRef.current?.()
       }
     }, ACK_TIMEOUT_MS)
   }
@@ -103,10 +94,11 @@ export function PermissionModeView({ current, onApplied, onCancel }: Props) {
     setApplyState('applying')
     retryCountRef.current = 0
     setErrorMsg('')
+    pendingModeRef.current = selected
 
-    // IG4: register ack handler with proper cleanup on each apply attempt
-    _registerAckHandler()
-    sendToggle(selected)
+    // IG5: use typed helper instead of manual makeEnvelope (consistent with subscribe API)
+    wsClient.sendModeToggle(selected)
+    _scheduleTimeout(selected)
   }
 
   const isApplying = applyState === 'applying' || applyState === 'retrying'

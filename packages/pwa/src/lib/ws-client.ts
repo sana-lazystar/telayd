@@ -48,6 +48,12 @@ interface AckHandler {
   onError: (payload: InquiryErrorPayload) => void
 }
 
+/**
+ * IG5: mode-toggle ack handler registered via subscribeModeAck.
+ * Receives both the ack and a boolean indicating success (applied).
+ */
+type ModeAckHandler = (payload: ModeToggleAckPayload) => void
+
 /** Narrow raw payload to InquiryPushPayload with required field checks */
 function narrowInquiryPushPayload(payload: unknown): InquiryPushPayload | null {
   if (typeof payload !== 'object' || payload === null) return null
@@ -123,6 +129,8 @@ export class WsClient {
   private _callbacks: WsClientCallbacks = {}
   // IG4: per-tool_use_id ack handlers (replaces global callback swap)
   private _ackHandlers = new Map<string, AckHandler>()
+  // IG5: single mode-ack subscriber (at most one PermissionModeView is mounted at a time)
+  private _modeAckHandler: ModeAckHandler | null = null
   private _reconnect: ReconnectScheduler
 
   constructor() {
@@ -148,6 +156,24 @@ export class WsClient {
     this._ackHandlers.set(toolUseId, handler)
     return () => {
       this._ackHandlers.delete(toolUseId)
+    }
+  }
+
+  /**
+   * IG5: Subscribe to mode-toggle-ack messages.
+   * At most one handler is active at a time (only one PermissionModeView mounts at once).
+   * Returns an unsubscribe function — call it in useEffect cleanup to prevent stale handlers.
+   *
+   * Usage (in PermissionModeView):
+   *   useEffect(() => wsClient.subscribeModeAck(handler), [handler])
+   */
+  subscribeModeAck(handler: ModeAckHandler): () => void {
+    this._modeAckHandler = handler
+    return () => {
+      // Only clear if this specific handler is still registered (guard against double-cleanup)
+      if (this._modeAckHandler === handler) {
+        this._modeAckHandler = null
+      }
     }
   }
 
@@ -306,7 +332,13 @@ export class WsClient {
       case 'mode-toggle-ack': {
         const payload = narrowModeToggleAckPayload(env.payload)
         if (!payload) return
-        this._callbacks.onModeToggleAck?.(payload)
+        // IG5: route to the dedicated subscriber first (PermissionModeView via subscribeModeAck),
+        // fall back to global onModeToggleAck callback (App.tsx mode-update bridge).
+        if (this._modeAckHandler) {
+          this._modeAckHandler(payload)
+        } else {
+          this._callbacks.onModeToggleAck?.(payload)
+        }
         break
       }
       default:
