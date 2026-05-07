@@ -108,18 +108,94 @@ async fn cmd_init() -> Result<()> {
 async fn cmd_start() -> Result<()> {
     info!(target: "cli", "telayd start");
 
-    // Write PID file.
+    // IG6 fix (P2): acquire exclusive flock on PID file before writing.
+    // This prevents two concurrent `telayd start` invocations from both
+    // believing they are the sole daemon (CWE-672 variant).
+    //
+    // Approach: open PID file with create+write, acquire LOCK_EX|LOCK_NB.
+    // If the lock fails, another process holds it → daemon already running.
+    //
+    // Note: `#[allow(unsafe_code)]` cannot be used here because main.rs has
+    // `#![forbid(unsafe_code)]`.  nix::fcntl::flock is safe Rust.
     let pid_path = paths::daemon_pid()?;
-    let pid = std::process::id();
-    paths::write_secret_file(&pid_path, pid.to_string().as_bytes())
-        .context("write PID file")?;
 
-    // Lock PID file to prevent duplicate daemon.
-    // (Simple check: if another process is already running with our PID file.)
-    // For L0, a basic existence + stale PID check suffices.
+    // Open the PID file (create if absent).  We keep the fd open for the
+    // lifetime of the process so the flock is held.
+    let pid_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&pid_path)
+        .context("open PID file")?;
+
+    // IG6 fix (P2): use nix::fcntl::Flock (new API, replaces deprecated flock fn).
+    // LOCK_EX|LOCK_NB — fail immediately if another process holds the lock.
+    //
+    // Flock::lock takes ownership of the file and returns a Flock<File> guard.
+    // We use std::ops::Deref to access the file for writing.
+    let locked_pid_file = {
+        use nix::fcntl::{Flock, FlockArg};
+        Flock::lock(pid_file, FlockArg::LockExclusiveNonblock)
+            .map_err(|(_, e)| {
+                if e == nix::errno::Errno::EWOULDBLOCK {
+                    anyhow::anyhow!(
+                        "daemon is already running (PID file locked). \
+                         Run `telayd stop` first, or remove {:?} manually.",
+                        pid_path
+                    )
+                } else {
+                    anyhow::anyhow!("flock PID file: {e}")
+                }
+            })?
+    };
+
+    // Write current PID into the locked file.
+    let pid = std::process::id();
+    {
+        use std::io::Write;
+        // Deref to access inner File, write PID, then truncate.
+        let mut f = &*locked_pid_file;
+        write!(f, "{pid}").context("write PID")?;
+    }
+    // Leak the Flock guard so the OS-level lock is held for the process lifetime.
+    // The lock is automatically released when the process exits (fd close).
+    // SAFETY: intentional leak — flock semantics require fd to stay open.
+    std::mem::forget(locked_pid_file);
 
     let cfg = config::Config::load().context("load config (run `telayd init` first)")?;
 
+    // IG6 fix (P1): wrap inner daemon loop with supervisor::supervised_run.
+    // This satisfies NFR-2 + K1 + K5: any panic in the main task
+    // causes a restart (up to MAX_RESTARTS=5) instead of daemon death.
+    //
+    // The supervisor closure captures: cfg (pairing token), pid, pid_path.
+    // Each restart re-registers sessions + rebuilds shared state — this is
+    // correct for L0 single-session dogfooding (in-memory state is rebuilt
+    // from the persisted config.toml).
+    let cfg_for_supervisor = cfg.clone();
+    let pid_path_for_cleanup = pid_path.clone();
+
+    println!("Telayd daemon started. PID {pid}");
+    println!("Press Ctrl-C or send SIGTERM to stop.");
+
+    supervisor::supervised_run(move || {
+        let cfg = cfg_for_supervisor.clone();
+        let pid_path = pid_path_for_cleanup.clone();
+        async move {
+            daemon_service_loop(cfg, pid_path).await
+        }
+    })
+    .await?;
+
+    info!(target: "cli", "daemon stopped");
+    Ok(())
+}
+
+/// Inner daemon service loop — spawns IPC, WS, tunnel, and signal handlers.
+///
+/// IG6 fix: extracted from cmd_start so supervisor::supervised_run can restart
+/// it on error without re-doing the PID file / flock setup.
+async fn daemon_service_loop(cfg: config::Config, pid_path: std::path::PathBuf) -> Result<()> {
     // Shared components.
     let metrics = Arc::new(metrics::MetricsCollector::new());
     let sentinel: Arc<dyn sentinel::SentinelParser> = Arc::new(sentinel::NoopSentinelParser);
@@ -182,9 +258,8 @@ async fn cmd_start() -> Result<()> {
     // Spawn cloudflared tunnel.
     let cf_cancel = cancellation.clone();
     let token_for_cf = cfg.pairing_token.clone();
-    let config_for_tunnel = cfg.clone();
+    let mut config_for_tunnel = cfg.clone();
     let tunnel_handle = tokio::spawn(async move {
-        let mut config_for_tunnel = config_for_tunnel;
         cf_tunnel::run_tunnel(cf_cancel, token_for_cf, move |url| {
             info!(target: "cli", "tunnel URL: {}", &url[..url.len().min(40)]);
             config_for_tunnel.last_tunnel_url = Some(url);
@@ -214,9 +289,6 @@ async fn cmd_start() -> Result<()> {
         }
     });
 
-    println!("Telayd daemon started. PID {pid}");
-    println!("Press Ctrl-C or send SIGTERM to stop.");
-
     // Wait for all tasks.
     let (ipc_res, ws_res, tunnel_res) =
         tokio::join!(ipc_handle, ws_handle, tunnel_handle);
@@ -233,9 +305,8 @@ async fn cmd_start() -> Result<()> {
         }
     }
 
-    // Remove PID file.
+    // Remove PID file on clean exit.
     let _ = std::fs::remove_file(&pid_path);
-    info!(target: "cli", "daemon stopped");
     Ok(())
 }
 
@@ -256,6 +327,36 @@ fn cmd_stop() -> Result<()> {
         .trim()
         .parse()
         .context("parse PID from PID file")?;
+
+    // IG6 fix (P2): verify the process at `pid` is actually `telayd` before
+    // sending SIGTERM (prevents killing an unrelated process that reused the PID).
+    // Uses `ps -p <pid> -o comm=` — POSIX-compatible on macOS.
+    let comm_output = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output();
+
+    match comm_output {
+        Ok(out) if out.status.success() => {
+            let comm = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // comm may be "telayd" or truncated; check prefix.
+            if !comm.starts_with("telayd") {
+                anyhow::bail!(
+                    "PID {pid} does not appear to be a telayd process (comm={comm:?}). \
+                     Remove {:?} manually if it is stale.",
+                    pid_path
+                );
+            }
+        }
+        Ok(_) => {
+            // ps returned non-zero: process not found.
+            println!("PID {pid} not found — removing stale PID file.");
+            let _ = std::fs::remove_file(&pid_path);
+            return Ok(());
+        }
+        Err(e) => {
+            tracing::warn!(target: "cli", err = %e, "ps comm-check failed — proceeding with SIGTERM");
+        }
+    }
 
     kill(Pid::from_raw(pid), Signal::SIGTERM).context("send SIGTERM")?;
     println!("SIGTERM sent to PID {pid}.");

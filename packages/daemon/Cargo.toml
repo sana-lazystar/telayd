@@ -74,7 +74,8 @@ flate2 = "1"
 tar = "0.4"
 
 # Process signal (SIGTERM/SIGKILL for cloudflared)
-nix = { version = "0.29", features = ["signal", "process"] }
+# "fs" feature required for nix::fcntl::flock (IG6: PID file locking).
+nix = { version = "0.29", features = ["signal", "process", "fs"] }
 
 [dev-dependencies]
 tempfile = "3"
