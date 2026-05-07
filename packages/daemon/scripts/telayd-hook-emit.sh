@@ -27,7 +27,19 @@ for _fd in 3 4 5 6 7 8 9; do
 done
 
 # ── Socket path (from $HOME, no user-controlled env) ─────────────────────────
-SOCK="${HOME}/.config/telayd/daemon.sock"
+# OS-specific path matches the daemon's `directories` crate resolution:
+#   - Darwin: `~/Library/Application Support/telayd/daemon.sock`
+#   - Linux/other: `~/.config/telayd/daemon.sock` (XDG)
+# Hardcoding the Linux-style path on macOS caused hook-to-daemon silent
+# disconnect (host-env drift, dogfooding-discovered).
+case "$(uname -s)" in
+  Darwin)
+    SOCK="${HOME}/Library/Application Support/telayd/daemon.sock"
+    ;;
+  *)
+    SOCK="${HOME}/.config/telayd/daemon.sock"
+    ;;
+esac
 
 # ── Daemon-absent guard ───────────────────────────────────────────────────────
 # If the socket file doesn't exist, or is a symlink (symlink-redirect attack),
@@ -109,6 +121,38 @@ case "${PAYLOAD}" in
     exit 0
     ;;
 esac
+
+# ── Extract current tmux session name and inject into payload ────────────────
+# Architecture intent (ipc.rs §16 comment): wire format includes `tmux_session`
+# so the daemon dispatches keystrokes to the originating session, not a hardcoded
+# fallback. Without this, daemon's `tmux send-keys` targets a non-existent session
+# and `inject failed` warnings flood the log (dogfooding-discovered).
+#
+# `tmux display-message -p '#{session_name}'` runs against the inherited TMUX
+# socket (no -L/-S needed: the env var TMUX selects the socket). When the hook
+# fires outside tmux (e.g. `claude` in a plain terminal), `$TMUX` is unset and
+# tmux returns non-zero → empty TMUX_SESSION_NAME → daemon falls back to its
+# startup default. Either way safe for the Claude session.
+TMUX_SESSION_NAME=""
+if [ -n "${TMUX:-}" ]; then
+  TMUX_SESSION_NAME="$(tmux display-message -p '#{session_name}' 2>/dev/null || true)"
+fi
+
+# Inject the field into the JSON object. We work on the already-validated
+# single-line payload that starts with '{'. Insert `"tmux_session":"<name>",`
+# right after the opening brace — JSON allows trailing commas only in
+# permissive parsers, but inserting at the *front* of the object body produces
+# valid JSON for any conforming parser (serde_json on the daemon side).
+#
+# Escape: tmux session names may legally contain `:` and `.` but never `"` or
+# `\` per tmux defaults; still, defensive escape `"` and `\` so a future
+# weird name can't break the JSON.
+if [ -n "${TMUX_SESSION_NAME}" ]; then
+  ESCAPED="$(printf '%s' "${TMUX_SESSION_NAME}" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  # PAYLOAD starts with '{'. Replace the first '{' with '{"tmux_session":"<name>",'.
+  # `sed` 1-occurrence replace via parameter expansion (bash 3.2-safe).
+  PAYLOAD="{\"tmux_session\":\"${ESCAPED}\",${PAYLOAD#\{}"
+fi
 
 # Write compacted single-line payload + newline terminator to tempfile (wire format).
 printf '%s\n' "${PAYLOAD}" > "${TMPFILE}"
