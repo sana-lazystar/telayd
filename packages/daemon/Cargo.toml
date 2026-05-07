@@ -127,22 +127,20 @@ let_underscore_untyped = "allow"
 manual_range_contains = "allow"
 unnecessary_debug_formatting = "allow"
 result_map_or_into_option = "allow"
-option_map_unwrap_or_else = "allow"
+# option_map_unwrap_or_else was renamed to map_unwrap_or (already allowed above); removed stale entry.
 manual_is_variant_and = "allow"
 assigning_clones = "allow"
-# Dead code is expected in L0 prototype (stub modules, future-use APIs).
-dead_code = "allow"
+# dead_code suppression is in [lints.rust] above (correct namespace); removed stale clippy:: entry.
 # format_string variables — will migrate in a later sweep.
 uninlined_format_args = "allow"
 # match patterns
 wildcard_in_or_patterns = "allow"
 match_single_binding = "allow"
-# open_without_truncate: all file opens in L0 are intentional append/create.
-open_without_truncate = "allow"
+# open_without_truncate was an unknown lint; removed stale entry (IG-r2-4).
 # let_else: pre-existing match patterns; migrate in later sweep.
 single_match_else = "allow"
 question_mark = "allow"
-map_or_else = "allow"
+# map_or_else was an unknown lint; removed stale entry (IG-r2-4).
 # Remaining pre-existing lint suppression (IG7 baseline)
 await_holding_lock = "allow"
 ignored_unit_patterns = "allow"

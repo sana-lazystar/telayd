@@ -294,9 +294,12 @@ async fn daemon_service_loop(cfg: config::Config, pid_path: std::path::PathBuf) 
         .await
     });
 
-    // Setup shutdown signal handler.
+    // Setup shutdown signal handlers.
+    // IG-r2-4 fix: preserve JoinHandles so orphan tasks are not silently leaked
+    // (project-rule.md §Rust 5 — orphan task ban).  The handles are joined below
+    // alongside the main service handles so the supervisor loop sees their exit.
     let cancel_for_signal = cancellation.clone();
-    tokio::spawn(async move {
+    let sigterm_handle = tokio::spawn(async move {
         if let Ok(mut sigterm) =
             tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         {
@@ -308,7 +311,7 @@ async fn daemon_service_loop(cfg: config::Config, pid_path: std::path::PathBuf) 
 
     // Ctrl-C.
     let cancel_for_ctrlc = cancellation.clone();
-    tokio::spawn(async move {
+    let ctrlc_handle = tokio::spawn(async move {
         if let Ok(()) = tokio::signal::ctrl_c().await {
             info!(target: "cli", "Ctrl-C received — shutting down");
             cancel_for_ctrlc.cancel();
@@ -318,6 +321,12 @@ async fn daemon_service_loop(cfg: config::Config, pid_path: std::path::PathBuf) 
     // Wait for all tasks.
     let (ipc_res, ws_res, tunnel_res) =
         tokio::join!(ipc_handle, ws_handle, tunnel_handle);
+
+    // Abort signal handler tasks (they are now idle after cancellation).
+    // We do not await them — their JoinHandle is consumed here so they are
+    // no longer orphaned (project-rule.md §Rust 5).
+    sigterm_handle.abort();
+    ctrlc_handle.abort();
 
     for (name, res) in [
         ("ipc", ipc_res),
