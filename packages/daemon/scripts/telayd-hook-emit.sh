@@ -50,14 +50,25 @@ trap 'cleanup' EXIT INT TERM
 
 TMPFILE="$(mktemp /tmp/telayd-hook-XXXXXX)"
 
-# Read stdin with a 2-second guard to prevent runaway read.
-if ! IFS= read -r -t 2 PAYLOAD_LINE; then
-  # Stdin parse/read failure → protect Claude session.
+# IG9 fix (diagnosis.md §Group9 P2): replace `read -r -t 2 PAYLOAD_LINE` with
+# `timeout 2 cat -` so that multi-line (pretty-printed) JSON is read in full.
+# `head -c $((256*1024))` caps at 256 KiB before any further processing.
+# `tr -d '\n'` collapses all newlines into a single-line payload that the
+# daemon IPC parser expects (newline-terminated single-line wire format).
+#
+# Bash 3.2 (macOS default) compatible — no bashisms, no jq dependency.
+# Failure modes:
+#   - timeout exits 124 if stdin blocks > 2s → PAYLOAD is empty → exit 0.
+#   - Any other failure propagates to the validation check below → exit 0.
+PAYLOAD="$(timeout 2 cat - | head -c $((256*1024)) | tr -d '\n')" || true
+
+# Guard: empty read (daemon timeout, closed stdin, or bash 3.2 timeout) → exit 0.
+if [ -z "${PAYLOAD}" ]; then
   exit 0
 fi
 
 # Validate: payload must start with '{' (minimal JSON guard).
-case "${PAYLOAD_LINE}" in
+case "${PAYLOAD}" in
   '{'*)
     : # OK
     ;;
@@ -67,8 +78,8 @@ case "${PAYLOAD_LINE}" in
     ;;
 esac
 
-# Write to tempfile (for nc stdin).
-printf '%s\n' "${PAYLOAD_LINE}" > "${TMPFILE}"
+# Write compacted single-line payload + newline terminator to tempfile (wire format).
+printf '%s\n' "${PAYLOAD}" > "${TMPFILE}"
 
 # ── Send to daemon via Unix socket (1s timeout) ───────────────────────────────
 # Use nc (netcat) with -U (Unix socket) and -w 1 (1-second timeout).

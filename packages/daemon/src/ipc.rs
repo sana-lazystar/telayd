@@ -9,11 +9,26 @@
 //! 4. Converts it to an internal [`Inquiry`] record.
 //! 5. Sends it to the WS bridge via an `mpsc` channel.
 //!
+//! # Wire Contract (IG9)
+//!
+//! The IPC wire format is **single-line newline-terminated JSON**:
+//! ```text
+//! {"tool_name":"AskUserQuestion","tool_use_id":"toolu_...","session_id":"...","tmux_session":"...",...}\n
+//! ```
+//!
+//! Claude Code's `PreToolUse` hook delivers the payload on stdout as compact
+//! single-line JSON in the current spec.  If a future Claude Code release emits
+//! pretty-printed (multi-line) JSON, the hook script (`telayd-hook-emit.sh`)
+//! normalises it to single-line via `tr -d '\n'` before forwarding (IG9 fix).
+//! This module therefore never needs to handle multi-line payloads — any stray
+//! newline mid-payload means a truncated or corrupt frame and is rejected with
+//! a friendly log at WARN level (no crash, no Claude session abort).
+//!
 //! Security:
 //! - Socket mode 0600 — only the daemon owner can write.
 //! - Stale socket file from a previous run is removed on startup.
 //! - Symlink at socket path is rejected.
-//! - Line length capped at 256 KiB (DoS guard).
+//! - Line length capped at 256 KiB (DoS guard, IG7).
 
 use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
