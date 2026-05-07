@@ -37,6 +37,12 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    allowedHosts: ['.trycloudflare.com'],
+  },
+  preview: {
+    port: 4173,
+    host: true,
+    allowedHosts: ['.trycloudflare.com'],
   },
   build: {
     target: 'es2020',
