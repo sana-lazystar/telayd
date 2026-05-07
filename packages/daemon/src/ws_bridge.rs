@@ -111,18 +111,52 @@ pub async fn run_ws_bridge(
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
+    // IG4 fix (diagnosis.md §Group4 P1): on cancellation, the active client
+    // must receive Close(4003, "server-shutting-down") before the listener drops.
+    // We signal the active client slot via a dedicated 4003-shutdown channel
+    // injected into WsBridgeState at state creation.  The per-connection task
+    // watches for this signal and emits the close frame on its own socket before
+    // exiting, giving a 1s grace window.
+    //
+    // Approach: cancel → send shutdown_tx → per-conn task receives, emits 4003 → exits.
+    let state_for_shutdown = state.clone();
+    let graceful_shutdown = async move {
+        cancellation_token.cancelled().await;
+        info!(target: "ws_bridge", "WS bridge shutting down — notifying active client");
+
+        // Signal the active client to close with 4003.
+        let client = state_for_shutdown.active_client.lock().await;
+        if let Some(ac) = &*client {
+            // We repurpose the `out_tx` channel to deliver a sentinel 4003-close frame.
+            // The per-connection task recognises this special frame type and sends
+            // Close(4003) before breaking its loop.
+            // Encode as a special internal signal frame (not a real WS frame —
+            // the event loop checks for SHUTDOWN_SENTINEL explicitly).
+            let _ = ac.out_tx.send(SHUTDOWN_SENTINEL.to_string()).await;
+            // Grace window: give the task 1s to emit the close frame.
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        drop(client);
+        info!(target: "ws_bridge", "WS bridge shutdown complete");
+    };
+
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .with_graceful_shutdown(async move {
-        cancellation_token.cancelled().await;
-        info!(target: "ws_bridge", "WS bridge shutting down");
-    })
+    .with_graceful_shutdown(graceful_shutdown)
     .await?;
 
     Ok(())
 }
+
+/// Internal sentinel value sent on `out_tx` to signal the per-connection task
+/// to send Close(4003, "server-shutting-down").
+///
+/// IG4 fix: this constant is used to distinguish the shutdown signal from
+/// normal outbound frames.  The per-connection event loop checks for it
+/// and emits Close(4003) on the actual WebSocket before breaking.
+const SHUTDOWN_SENTINEL: &str = "__TELAYD_SHUTDOWN_4003__";
 
 /// Forwards an `Inquiry` to the connected PWA client (if any).
 ///
@@ -390,6 +424,15 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
 
             // Outbound frame from daemon.
             Some(frame) = out_rx.recv() => {
+                // IG4 fix: check for shutdown sentinel before forwarding.
+                if frame == SHUTDOWN_SENTINEL {
+                    info!(target: "ws_bridge", %ip, "sending Close(4003) — server shutting down");
+                    let _ = socket.send(Message::Close(Some(AxumCloseFrame {
+                        code: 4003,
+                        reason: "server-shutting-down".into(),
+                    }))).await;
+                    break;
+                }
                 if socket.send(Message::Text(frame.into())).await.is_err() {
                     break;
                 }
