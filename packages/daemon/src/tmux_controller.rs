@@ -1,10 +1,18 @@
 //! Tmux send-keys injection + dialog-ready detection.
 //!
-//! Implements ADR-W003:
-//! - `tmux pipe-pane` log polling at 50ms intervals, 5s budget.
+//! Implements ADR-W003 (dogfooding-revised):
+//! - `tmux capture-pane -p -J` snapshot polling at 50ms intervals, 5s budget.
+//!   capture-pane returns the *rendered* pane content (with TUI cursor moves
+//!   resolved by tmux), so it works with Ratatui/Ink-style cell rendering used
+//!   by Claude Code's permission dialog. The original pipe-pane stream-tail
+//!   approach (spike 06.1 era) failed against current Claude Code because
+//!   "Enter to select" never appears as contiguous bytes in the raw stream
+//!   when each character is positioned via cursor escape sequences.
 //! - 0.5s safety margin after marker detection.
 //! - 1 retry on timeout, then inject forcibly + warn.
 //! - send-keys invoked via `tokio::process::Command` (argv array — no shell).
+//! - pipe-pane is still activated for forensic logging only — detection no
+//!   longer reads from it.
 //!
 //! Security:
 //! - `tmux_session` validated against in-memory active set before use.
@@ -293,12 +301,17 @@ async fn disable_pipe_pane(session: &str) -> Result<()> {
     Ok(())
 }
 
-/// Polls the pipe-pane log for a dialog-ready marker.
+/// Polls `tmux capture-pane` snapshots for a dialog-ready marker.
+///
+/// `capture-pane -p -J` returns the rendered pane content (with TUI cursor
+/// positioning resolved), which contains "Enter to select" / "↑/↓ to navigate"
+/// as contiguous text once Claude Code's permission dialog is on-screen. The
+/// older pipe-pane stream-tail approach failed against Ratatui-style cell
+/// rendering (each character drawn via independent cursor moves).
 ///
 /// Returns `Ok(())` when a marker is found (after 0.5s safety margin).
 /// Returns `Err` if the 5s budget is exceeded.
 async fn await_dialog_ready(session: &str) -> Result<()> {
-    let log = pipe_pane_log_path(session);
     let deadline = Instant::now() + DETECTION_BUDGET;
 
     loop {
@@ -306,8 +319,16 @@ async fn await_dialog_ready(session: &str) -> Result<()> {
             anyhow::bail!("dialog ready timeout for session {session:?}");
         }
 
-        if log.exists() {
-            let content = std::fs::read_to_string(&log).unwrap_or_default();
+        let output = Command::new("tmux")
+            .args(["capture-pane", "-t", session, "-p", "-J"])
+            .output()
+            .await
+            .context("tmux capture-pane")?;
+
+        if output.status.success() {
+            // capture-pane may still emit a few SGR sequences in some themes —
+            // strip ANSI defensively before substring search.
+            let content = String::from_utf8_lossy(&output.stdout);
             let stripped = strip_ansi(&content);
             for marker in READY_MARKERS {
                 if stripped.contains(marker) {
@@ -317,6 +338,8 @@ async fn await_dialog_ready(session: &str) -> Result<()> {
                 }
             }
         }
+        // capture-pane non-zero exit (session vanished, etc.) → treat as
+        // "not ready yet" and retry the next interval until budget exhausts.
 
         tokio::time::sleep(POLL_INTERVAL).await;
     }
