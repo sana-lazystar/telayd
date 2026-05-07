@@ -10,7 +10,7 @@ const LAST_TOKEN_MASKED_KEY = 'telayd:last_token_masked'
 /** Mask token for display and storage: AbCd...****  */
 export function maskToken(token: string): string {
   if (token.length < 8) return '****'
-  return `${token.slice(0, 4)}...${token.slice(-4)}`
+  return `${token.slice(0, 4)}...${'*'.repeat(4)}`
 }
 
 export function saveLastUrl(url: string): void {
