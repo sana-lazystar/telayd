@@ -267,15 +267,17 @@ fn cmd_stop() -> Result<()> {
 fn cmd_logs(lines: u32) -> Result<()> {
     let log_path = paths::daemon_log()?;
 
-    // Scan from the config dir for the most-recent telayd-*.log file.
-    // IG10 fix: deployment-plan uses `telayd-YYYYMMDD.log`; glob updated to match.
+    // IG3 fix (diagnosis.md §Group3 P0): tracing_appender::rolling::Builder produces
+    // `telayd.YYYY-MM-DD.log` (period separator, `.log` extension).
+    // Updated glob: `starts_with("telayd.") && ends_with(".log")`.
+    // Pattern-wide grep: single locus — this is the only `starts_with("telayd` in daemon/src.
     let config_dir = paths::config_dir()?;
     let mut log_files: Vec<_> = std::fs::read_dir(&config_dir)?
         .filter_map(|e| e.ok())
         .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("telayd-")
+            let name = e.file_name();
+            let s = name.to_string_lossy();
+            s.starts_with("telayd.") && s.ends_with(".log")
         })
         .collect();
     log_files.sort_by_key(|e| e.file_name());
