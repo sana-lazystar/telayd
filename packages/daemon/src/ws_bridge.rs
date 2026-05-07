@@ -125,7 +125,37 @@ pub async fn run_ws_bridge(
 }
 
 /// Forwards an `Inquiry` to the connected PWA client (if any).
+///
+/// IG2 fix (diagnosis.md §Group2 P1): before pushing the inquiry, if the
+/// stored `permission_mode` differs from the mode carried in the inquiry payload
+/// (or any mode toggle was deferred), replay `apply_permission_mode` once so that
+/// idle-state toggles take effect on the first inquiry after the toggle.
 pub async fn push_inquiry(state: &Arc<WsBridgeState>, inquiry: Inquiry) -> Result<()> {
+    // IG2 fix: replay deferred mode toggle on inquiry arrival.
+    // Only send the mode command if we have an active session to target.
+    {
+        let current_mode = state.permission_mode.lock().await.clone();
+        // Use the inquiry's tmux_session as the target for mode replay.
+        let sess = inquiry.tmux_session.clone();
+        if !sess.is_empty() {
+            // Check whether the session is registered — if so, apply mode idempotently.
+            if state.tmux.first_active_session().is_some() {
+                // Idempotent replay: apply the current stored mode to this session.
+                // This ensures that a deferred toggle (applied=false due to no-session)
+                // takes effect when the next inquiry arrives.
+                let mode_applied = state.tmux.send_mode_command(&sess, &current_mode).await;
+                if mode_applied {
+                    debug!(
+                        target: "ws_bridge",
+                        tmux_session = %sess,
+                        mode = ?current_mode,
+                        "replayed deferred permission mode on inquiry-push"
+                    );
+                }
+            }
+        }
+    }
+
     let client = state.active_client.lock().await;
     if let Some(ac) = &*client {
         // Register in pending map.
@@ -650,11 +680,11 @@ async fn handle_mode_toggle(env: Envelope, state: &Arc<WsBridgeState>) -> Result
 
     info!(target: "ws_bridge", mode = ?req.mode, "mode-toggle-request");
 
-    // Apply mode change via TmuxController (IG6 fix: not direct Command::new("tmux")).
-    // IG10 fix: `apply_permission_mode` returns `false` when no session is known —
-    // the ack will have `applied: false`, which is the correct semantics.
-    let applied = apply_permission_mode(&req.mode, state).await;
+    // IG2 fix: apply_permission_mode now returns (applied, reason).
+    let (applied, reason) = apply_permission_mode(&req.mode, state).await;
 
+    // IG2 fix: always persist the requested mode (whether applied immediately or deferred).
+    // On next inquiry-push the mode will be replayed.
     {
         let mut current = state.permission_mode.lock().await;
         *current = req.mode.clone();
@@ -666,6 +696,7 @@ async fn handle_mode_toggle(env: Envelope, state: &Arc<WsBridgeState>) -> Result
         &ModeToggleAck {
             mode: req.mode,
             applied,
+            reason: reason.map(str::to_owned),
         },
     )?;
 
@@ -681,22 +712,35 @@ async fn handle_mode_toggle(env: Envelope, state: &Arc<WsBridgeState>) -> Result
 /// Claude Code accepts `/mode plan`, `/mode accept-edits`, `/mode default`
 /// (Anthropic #35637 wedge).
 ///
+/// IG2 fix (diagnosis.md §Group2 P1):
+/// - Falls back to `tmux.active_sessions` when `pending_inquiries` is empty
+///   (covers the idle-state toggle scenario from Anthropic #35637).
+/// - If still no session is known, returns `(false, "no-session")`.
+///
 /// IG6 fix: routes through `TmuxController::send_mode_command` which validates
 /// the session against the active whitelist — no direct `Command::new("tmux")`.
-async fn apply_permission_mode(mode: &PermissionMode, state: &Arc<WsBridgeState>) -> bool {
-    // Use the first pending inquiry's session as the target.
-    // L0: single-session assumption — use whichever session is known.
+async fn apply_permission_mode(mode: &PermissionMode, state: &Arc<WsBridgeState>) -> (bool, Option<&'static str>) {
+    // First: try pending inquiries (mid-prompt case).
     let session = {
         let pending = state.pending_inquiries.read().await;
         pending.values().next().map(|(inq, _)| inq.tmux_session.clone())
     };
 
-    if let Some(sess) = session {
-        state.tmux.send_mode_command(&sess, mode).await
+    // IG2 fix: Fall back to active_sessions if no pending inquiry.
+    let session = if let Some(s) = session {
+        Some(s)
     } else {
-        // No active session known — mode toggle cannot be applied.
-        // Returns false; caller sends mode-toggle-ack{applied:false}.
-        false
+        // TmuxController::active_sessions() returns the list of registered sessions.
+        state.tmux.first_active_session()
+    };
+
+    if let Some(sess) = session {
+        let applied = state.tmux.send_mode_command(&sess, mode).await;
+        (applied, None)
+    } else {
+        // No active session known — deferred apply (mode is stored, replayed on next inquiry).
+        warn!(target: "ws_bridge", "mode-toggle: no active session — deferring until next inquiry-push");
+        (false, Some("no-session"))
     }
 }
 

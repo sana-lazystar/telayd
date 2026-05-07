@@ -215,6 +215,10 @@ pub struct ModeToggleRequest {
 pub struct ModeToggleAck {
     pub mode: PermissionMode,
     pub applied: bool,
+    /// IG2 fix: optional reason when `applied=false` (e.g. "no-session").
+    /// Serialised as `null` when absent so the PWA can always check.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

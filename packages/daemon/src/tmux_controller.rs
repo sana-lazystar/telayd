@@ -213,6 +213,17 @@ impl TmuxController {
     pub fn sentinel_parser(&self) -> &Arc<dyn crate::sentinel::SentinelParser> {
         &self.sentinel_parser
     }
+
+    /// Returns the first registered active session name, if any.
+    ///
+    /// IG2 fix (diagnosis.md §Group2 P1): `apply_permission_mode` in `ws_bridge.rs`
+    /// calls this as fallback when `pending_inquiries` is empty (idle-state toggle).
+    /// L0 single-session assumption: returns the first session alphabetically.
+    pub fn first_active_session(&self) -> Option<String> {
+        let set = self.active_sessions.lock().expect("lock active_sessions");
+        // Use `iter().next()` — single-session assumption for L0.
+        set.iter().next().cloned()
+    }
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
