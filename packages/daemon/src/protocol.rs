@@ -197,6 +197,7 @@ pub enum PermissionMode {
 }
 
 impl PermissionMode {
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             PermissionMode::Plan => "plan",

@@ -47,6 +47,7 @@ impl PairingToken {
     /// Exposes the raw token string for comparison or config serialisation.
     ///
     /// Intentionally named `expose_secret` so callers are grep-able.
+    #[must_use]
     pub fn expose_secret(&self) -> &str {
         &self.0
     }
@@ -69,6 +70,7 @@ pub fn generate_token() -> anyhow::Result<String> {
 }
 
 /// Returns `true` iff `s` is exactly 43 chars of `[A-Za-z0-9_-]`.
+#[must_use]
 pub fn is_valid_token_format(s: &str) -> bool {
     s.len() == 43
         && s.bytes()

@@ -165,6 +165,7 @@ impl HookPayload {
     }
 
     /// Converts validated payload to an internal `Inquiry` record.
+    #[must_use]
     pub fn into_inquiry(self, tmux_session: String) -> Inquiry {
         use crate::protocol::{InquiryOption, InquiryQuestion};
         let header = self

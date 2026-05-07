@@ -25,6 +25,7 @@ impl Default for MetricsCollector {
 }
 
 impl MetricsCollector {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             latency_samples: Mutex::new(VecDeque::with_capacity(MAX_SAMPLES)),
@@ -74,6 +75,7 @@ pub struct LatencyTimer {
 }
 
 impl LatencyTimer {
+    #[must_use]
     pub fn start() -> Self {
         Self {
             start: Instant::now(),
@@ -81,6 +83,7 @@ impl LatencyTimer {
     }
 
     /// Returns elapsed milliseconds since `start()`.
+    #[must_use]
     pub fn elapsed_ms(&self) -> u64 {
         self.start.elapsed().as_millis() as u64
     }

@@ -15,6 +15,7 @@
 /// | 1 | any | `["Enter"]` |
 /// | 2..=9 | ≤ 9 | `["<digit>", "Enter"]` |
 /// | 10+ | > 9 | `Down` × (idx-1) times then `Enter` |
+#[must_use]
 pub fn keystrokes_for(choice_index: u32, options_total: u32) -> Vec<String> {
     match choice_index {
         1 => vec!["Enter".to_string()],

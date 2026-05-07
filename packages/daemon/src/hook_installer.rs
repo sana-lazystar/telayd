@@ -140,6 +140,7 @@ fn read_no_follow(path: &std::path::Path) -> Result<String> {
 }
 
 /// Returns `true` if our hook command already exists in `PreToolUse`.
+#[must_use]
 pub fn is_hook_installed(json: &Value) -> bool {
     let hooks_arr = json
         .pointer("/hooks/PreToolUse")

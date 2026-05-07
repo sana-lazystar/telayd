@@ -6,7 +6,7 @@
 //! - `stop`   — send SIGTERM to running daemon.
 //! - `logs`   — tail `daemon.log`.
 //! - `status` — print last_tunnel_url + daemon state.
-//!              `--reveal` flag: print full token after Y/n confirmation.
+//! - `status` (with `--reveal`): print full token after Y/n confirmation.
 
 use clap::{Parser, Subcommand};
 
