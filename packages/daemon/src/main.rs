@@ -273,11 +273,23 @@ async fn daemon_service_loop(cfg: config::Config, pid_path: std::path::PathBuf) 
     let cf_cancel = cancellation.clone();
     let token_for_cf = cfg.pairing_token.clone();
     let mut config_for_tunnel = cfg.clone();
+    // IG8 fix: capture ws_state reference so the tunnel URL is pushed into
+    // WsBridgeState::tunnel_origin on every rotation.  The Origin allowlist
+    // in ws_upgrade_handler reads this field before accepting WS upgrades.
+    let ws_state_for_tunnel = ws_state.clone();
     let tunnel_handle = tokio::spawn(async move {
         cf_tunnel::run_tunnel(cf_cancel, token_for_cf, move |url| {
             info!(target: "cli", "tunnel URL: {}", &url[..url.len().min(40)]);
-            config_for_tunnel.last_tunnel_url = Some(url);
+            config_for_tunnel.last_tunnel_url = Some(url.clone());
             let _ = config_for_tunnel.save();
+            // Propagate URL to ws_bridge Origin allowlist (async → fire-and-forget via block_on is not
+            // available here; use the synchronous RwLock write instead via tokio::runtime::Handle).
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                let ws = ws_state_for_tunnel.clone();
+                handle.spawn(async move {
+                    ws.set_tunnel_url(Some(url)).await;
+                });
+            }
         })
         .await
     });

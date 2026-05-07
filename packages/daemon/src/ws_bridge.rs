@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use axum::extract::ws::{CloseFrame as AxumCloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{ConnectInfo, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::Router;
@@ -71,6 +72,12 @@ pub struct WsBridgeState {
     pub metrics: Arc<MetricsCollector>,
     /// Current permission mode (reflects last successful mode-toggle).
     pub permission_mode: Mutex<PermissionMode>,
+    /// IG8 fix: current cloudflared tunnel URL (None until tunnel is established).
+    ///
+    /// Used to build the Origin allowlist: `["null", "https://<tunnel-url>"]`.
+    /// Updated atomically by `cf_tunnel::run_tunnel` callback at each URL rotation.
+    /// "null" is always allowed for direct-connect during local dev.
+    pub tunnel_origin: Arc<RwLock<Option<String>>>,
 }
 
 impl WsBridgeState {
@@ -87,7 +94,16 @@ impl WsBridgeState {
             tmux,
             metrics,
             permission_mode: Mutex::new(PermissionMode::Default),
+            tunnel_origin: Arc::new(RwLock::new(None)),
         })
+    }
+
+    /// Updates the current tunnel URL (called by `cf_tunnel` on each URL rotation).
+    ///
+    /// IG8 fix: the Origin allowlist is rebuilt from this URL on every WS upgrade.
+    pub async fn set_tunnel_url(&self, url: Option<String>) {
+        let mut guard = self.tunnel_origin.write().await;
+        *guard = url;
     }
 }
 
@@ -215,12 +231,69 @@ async fn health_handler() -> impl IntoResponse {
     axum::Json(serde_json::json!({ "status": "ok", "v": 1 }))
 }
 
+/// IG8 fix: verify the `Origin` header before allowing the WS upgrade.
+///
+/// Allowlist: `["null", "https://<current-tunnel-url>"]`.
+/// - `"null"` covers direct `file://` or same-origin browser opens (local dev).
+/// - The tunnel URL is updated at runtime via `WsBridgeState::set_tunnel_url`.
+/// - Absent Origin header is treated as `"null"` (CLI / native clients).
+/// - Rejected origins return HTTP 403 before the upgrade handshake.
 async fn ws_upgrade_handler(
     ws: WebSocketUpgrade,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     State(state): State<Arc<WsBridgeState>>,
 ) -> impl IntoResponse {
+    // Extract Origin header value (UTF-8 only; non-UTF-8 bytes → reject).
+    let origin: Option<String> = headers
+        .get("origin")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+
+    // Build allowlist: "null" is always permitted; add tunnel URL if known.
+    let tunnel_url = state.tunnel_origin.read().await.clone();
+    let allowed = is_origin_allowed(origin.as_deref(), tunnel_url.as_deref());
+
+    if !allowed {
+        warn!(
+            target: "ws_bridge",
+            origin = ?origin,
+            "WS upgrade rejected — Origin not in allowlist"
+        );
+        return (StatusCode::FORBIDDEN, "forbidden: origin not allowed").into_response();
+    }
+
     ws.on_upgrade(move |socket| handle_ws(socket, addr, state))
+}
+
+// ── Origin allowlist helper ───────────────────────────────────────────────────
+
+/// Returns `true` if `origin` is in the WS upgrade allowlist.
+///
+/// Allowlist rules (IG8):
+/// 1. `None` (absent header) → permitted — covers CLI tools and native clients.
+/// 2. `"null"` → permitted — covers `file://` origins and same-origin dev access.
+/// 3. `https://<tunnel_url>` → permitted when tunnel is established.
+/// 4. All others → rejected (HTTP 403).
+fn is_origin_allowed(origin: Option<&str>, tunnel_url: Option<&str>) -> bool {
+    match origin {
+        // No Origin header (CLI / native client) or "null" (browser file:// origin) → allow.
+        None | Some("null") => true,
+        Some(o) => {
+            // Allow if it matches the current tunnel URL (scheme + host only).
+            if let Some(tunnel) = tunnel_url {
+                // Strip trailing slash from both sides for robust comparison.
+                let o_norm = o.trim_end_matches('/');
+                let t_norm = tunnel.trim_end_matches('/');
+                // The tunnel URL may contain a path; the Origin header never
+                // contains a path component — compare scheme+host only.
+                // If the tunnel URL starts with the origin value, it matches.
+                o_norm == t_norm || t_norm.starts_with(o_norm)
+            } else {
+                false
+            }
+        }
+    }
 }
 
 // ── Per-connection handler ────────────────────────────────────────────────────
@@ -378,7 +451,27 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
 
     // ── Pairing success ─────────────────────────────────────────────────────
     let session_id = Uuid::new_v4().to_string();
-    if let Ok(ack_frame) = build_frame(
+
+    // IG8 fix (P3): fill `active_client` BEFORE sending pairing-ack.
+    //
+    // Race window in the original design:
+    //   1. Send pairing-ack
+    //   2. …network gap / task preemption…
+    //   3. Fill active_client
+    //
+    // A daemon-side event arriving between steps 1 and 3 would fail to
+    // deliver to the newly-paired client because the slot is still empty.
+    //
+    // Fix: fill the slot first; if the send fails, clear the slot and return.
+    let (out_tx, mut out_rx) = mpsc::channel::<String>(64);
+    let (evict_tx, mut evict_rx) = tokio::sync::oneshot::channel::<()>();
+    {
+        let mut active = state.active_client.lock().await;
+        *active = Some(ActiveClient { out_tx, evict_tx });
+    }
+
+    // Send pairing-ack; on failure, clear the slot and exit.
+    let ack_sent = match build_frame(
         "pairing-ack",
         &env.id,
         &PairingAck {
@@ -386,21 +479,18 @@ async fn handle_ws(mut socket: WebSocket, addr: SocketAddr, state: Arc<WsBridgeS
             server_version: env!("CARGO_PKG_VERSION").to_string(),
         },
     ) {
-        if socket.send(Message::Text(ack_frame.into())).await.is_err() {
-            return;
-        }
+        Ok(ack_frame) => socket.send(Message::Text(ack_frame.into())).await.is_ok(),
+        Err(_) => false,
+    };
+
+    if !ack_sent {
+        // Clear the slot we just filled — client never received the ack.
+        let mut active = state.active_client.lock().await;
+        *active = None;
+        return;
     }
 
     info!(target: "auth", remote_ip = %ip, session = %session_id, "pairing successful");
-
-    // ── Outbound channel + per-session eviction channel ──────────────────────
-    // IG2 fix: per-task oneshot eviction channel; eviction site fires evict_tx.
-    let (out_tx, mut out_rx) = mpsc::channel::<String>(64);
-    let (evict_tx, mut evict_rx) = tokio::sync::oneshot::channel::<()>();
-    {
-        let mut active = state.active_client.lock().await;
-        *active = Some(ActiveClient { out_tx, evict_tx });
-    }
 
     // ── Event loop ─────────────────────────────────────────────────────────
     let mut missed_pings: u32 = 0;
@@ -832,6 +922,53 @@ async fn is_tarpitted(state: &Arc<WsBridgeState>, ip: &str) -> bool {
 mod tests {
     use super::*;
     use crate::protocol::{InquiryOption, InquiryQuestion};
+
+    // ── IG8: Origin allowlist unit tests ──────────────────────────────────────
+
+    #[test]
+    fn origin_absent_always_allowed() {
+        // CLI tools / native clients send no Origin header.
+        assert!(is_origin_allowed(None, None));
+        assert!(is_origin_allowed(None, Some("https://abc.trycloudflare.com")));
+    }
+
+    #[test]
+    fn origin_null_always_allowed() {
+        // Browser file:// origin sends "null".
+        assert!(is_origin_allowed(Some("null"), None));
+        assert!(is_origin_allowed(Some("null"), Some("https://abc.trycloudflare.com")));
+    }
+
+    #[test]
+    fn origin_matches_tunnel_url() {
+        let tunnel = "https://abc-def.trycloudflare.com";
+        assert!(is_origin_allowed(Some("https://abc-def.trycloudflare.com"), Some(tunnel)));
+    }
+
+    #[test]
+    fn origin_does_not_match_different_tunnel() {
+        let tunnel = "https://abc-def.trycloudflare.com";
+        assert!(!is_origin_allowed(Some("https://xyz.trycloudflare.com"), Some(tunnel)));
+    }
+
+    #[test]
+    fn origin_rejected_when_no_tunnel_established() {
+        // Arbitrary origin with no tunnel URL → reject.
+        assert!(!is_origin_allowed(Some("https://evil.example.com"), None));
+    }
+
+    #[test]
+    fn origin_rejected_for_untrusted_host() {
+        let tunnel = "https://abc-def.trycloudflare.com";
+        assert!(!is_origin_allowed(Some("https://evil.com"), Some(tunnel)));
+    }
+
+    #[test]
+    fn origin_trailing_slash_normalized() {
+        let tunnel = "https://abc-def.trycloudflare.com/";
+        // Origin headers never carry trailing slashes, but be defensive.
+        assert!(is_origin_allowed(Some("https://abc-def.trycloudflare.com"), Some(tunnel)));
+    }
 
     fn make_state() -> Arc<WsBridgeState> {
         let tmux = Arc::new(TmuxController::new(Arc::new(
