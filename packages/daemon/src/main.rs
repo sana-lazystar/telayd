@@ -10,6 +10,9 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use tracing::{error, info};
 
+// std::io::Read is needed for stdin().read_line in cmd_status --reveal.
+use std::io::BufRead as _;
+
 mod cli;
 mod cf_tunnel;
 mod config;
@@ -43,7 +46,7 @@ async fn main() {
         Commands::Start => cmd_start().await,
         Commands::Stop => cmd_stop(),
         Commands::Logs { lines } => cmd_logs(lines),
-        Commands::Status => cmd_status(),
+        Commands::Status { reveal } => cmd_status(reveal),
     };
 
     if let Err(e) = result {
@@ -327,7 +330,13 @@ fn redact_token(line: &str) -> String {
 
 // ── Status ────────────────────────────────────────────────────────────────────
 
-fn cmd_status() -> Result<()> {
+/// Prints daemon status.
+///
+/// IG1/IG6 fix: added `reveal` flag (diagnosis.md §Group1/§Group6).
+/// When `--reveal` is passed, prints the full token once after a Y/n prompt.
+/// This is the only recovery path now that the notification no longer contains
+/// the full token (IG1 strips it from the notification body).
+fn cmd_status(reveal: bool) -> Result<()> {
     let pid_path = paths::daemon_pid()?;
     let daemon_running = pid_path.exists();
     let pid_str = if daemon_running {
@@ -340,22 +349,58 @@ fn cmd_status() -> Result<()> {
     };
 
     let cfg = config::Config::load();
-    let (tunnel_url, token_masked) = match cfg {
+    let (tunnel_url, token_masked, token_raw) = match cfg {
         Ok(c) => {
-            let t = &c.pairing_token;
-            let masked = format!("{}***", &t[..4.min(t.len())]);
+            let t = c.pairing_token.clone();
+            let masked = if t.len() >= 8 {
+                format!("{}\u{2026}{}", &t[..4], &t[t.len() - 4..])
+            } else {
+                format!("{}…", &t[..4.min(t.len())])
+            };
             (
                 c.last_tunnel_url
                     .unwrap_or_else(|| "(none yet)".to_string()),
                 masked,
+                Some(t),
             )
         }
-        Err(_) => ("(config not found — run `telayd init`)".to_string(), "(none)".to_string()),
+        Err(_) => (
+            "(config not found — run `telayd init`)".to_string(),
+            "(none)".to_string(),
+            None,
+        ),
     };
 
     println!("Daemon:       {}", if daemon_running { &pid_str } else { "not running" });
     println!("Token:        {token_masked}");
     println!("Tunnel URL:   {tunnel_url}");
+
+    // IG1/IG6 fix: --reveal flag prints the full token once after Y/n confirmation.
+    if reveal {
+        if let Some(raw_token) = token_raw {
+            // Prompt user for confirmation before revealing.
+            eprint!("Reveal full pairing token? [y/N] ");
+            let mut input = String::new();
+            std::io::stdin()
+                .read_line(&mut input)
+                .context("read confirmation")?;
+            let answer = input.trim().to_lowercase();
+            if answer == "y" || answer == "yes" {
+                // Print to stdout exactly once (no logging — audit trail only).
+                // tracing::warn without the token — for audit only.
+                tracing::warn!(
+                    target: "security",
+                    "pairing token revealed via telayd status --reveal (token NOT logged here)"
+                );
+                println!("Token: {raw_token}");
+            } else {
+                println!("Reveal cancelled.");
+            }
+        } else {
+            eprintln!("No config found — run `telayd init` first.");
+        }
+    }
+
     Ok(())
 }
 
@@ -396,7 +441,13 @@ mod tests {
     #[test]
     fn cli_parses_status() {
         let cli = Cli::try_parse_from(["telayd", "status"]).unwrap();
-        assert!(matches!(cli.command, Commands::Status));
+        assert!(matches!(cli.command, Commands::Status { reveal: false }));
+    }
+
+    #[test]
+    fn cli_parses_status_reveal() {
+        let cli = Cli::try_parse_from(["telayd", "status", "--reveal"]).unwrap();
+        assert!(matches!(cli.command, Commands::Status { reveal: true }));
     }
 
     #[test]

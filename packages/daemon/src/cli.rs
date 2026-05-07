@@ -6,6 +6,7 @@
 //! - `stop`   — send SIGTERM to running daemon.
 //! - `logs`   — tail `daemon.log`.
 //! - `status` — print last_tunnel_url + daemon state.
+//!              `--reveal` flag: print full token after Y/n confirmation.
 
 use clap::{Parser, Subcommand};
 
@@ -32,5 +33,16 @@ pub enum Commands {
         lines: u32,
     },
     /// Print current status (last tunnel URL, daemon pid, mode).
-    Status,
+    ///
+    /// Use --reveal to print the full pairing token once (requires Y/n confirmation).
+    /// This is the only safe recovery path after `telayd init` — the notification
+    /// no longer includes the full token (IG1 fix).
+    Status {
+        /// Reveal the full pairing token to stdout after Y/n confirmation.
+        ///
+        /// Use this when you need to re-enter the token on a new device.
+        /// The token is printed once and not logged.
+        #[arg(long, default_value_t = false)]
+        reveal: bool,
+    },
 }
