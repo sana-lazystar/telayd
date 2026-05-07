@@ -1,0 +1,42 @@
+# Build artifacts
+target/
+node_modules/
+dist/
+.vite/
+
+# Logs
+*.log
+**/daemon.log
+
+# Secrets — config.toml은 ~/.config/에 있어 repo 진입 안 하지만 명시적 가드
+**/config.toml
+**/*.token
+**/*.pem
+**/*.key
+.env
+.env.*
+!.env.example
+
+# Pid / sock
+*.pid
+*.sock
+
+# tmux pipe-pane logs
+telayd-*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Cargo lock (daemon binary — keep for reproducibility)
+# Cargo.lock is committed for binaries
+
+# pnpm
+pnpm-debug.log
+.pnpm-store/

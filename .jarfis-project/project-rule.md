@@ -2,7 +2,7 @@
 
 > JARFIS sub-agent (특히 QA / DevOps)에 자동 주입되는 coding/operating rules.
 > 이 파일이 비어있어도 JARFIS는 작동 (`/jarfis:project-init` Step 4.5의 empty 보장).
-> SSOT는 `~/AI--SPILL-OVER/telayd-planning/mvp-scope/scope.md` v0.2.3.
+> SSOT는 `~/AI-OVERALL/telayd-org/planning/mvp-scope/scope.md` v0.2.3.
 
 ---
 

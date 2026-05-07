@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Telayd</title>
+    <meta name="description" content="Claude Code 모바일 제어 — Telayd" />
+    <meta name="theme-color" content="#0d1117" />
+    <meta name="color-scheme" content="dark" />
+
+    <!-- IG9: Security headers via meta (HTTP-header CSP deferred to L1+ hosting)
+         Note: frame-ancestors cannot be set via meta — requires HTTP header (L1 hosting decision).
+         Permissions-Policy: push notification excluded per project-rule L0 out-of-scope.
+         IG11: ws://localhost:7777 stripped in production build via vite-plugin htmlTransform
+         defined in vite.config.ts. The dev build retains it for local daemon connection. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss://*.trycloudflare.com ws://localhost:7777; object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
+    <meta name="referrer" content="no-referrer" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- iOS PWA -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Telayd" />
+    <!-- apple-touch-icon.png: removed dangling link (IG11, no icon asset available at L0).
+         Re-add when 180×180 PNG is generated. -->
+    <!-- <link rel="apple-touch-icon" href="/apple-touch-icon.png" /> -->
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

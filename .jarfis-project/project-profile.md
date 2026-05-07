@@ -3,8 +3,9 @@
 > Generated manually on 2026-05-06 (greenfield — no codebase yet, `/jarfis:project-init` deferred until L0 빌드 시작)
 > Depth: medium (planned)
 > Type: Fullstack (Daemon = Rust backend / PWA = React frontend / shared protocol types via typeshare L1+)
+> org: /Users/sanhalee/AI-OVERALL/telayd-org
 > Last-Commit: (initial)
-> 빌드 위치: `~/AI-OVERALL/telayd/`
+> 빌드 위치: `~/AI-OVERALL/telayd-org/telayd/`
 
 ---
 
@@ -84,15 +85,6 @@ telayd/
 │       ├── package.json
 │       ├── vite.config.ts
 │       └── README.md
-├── architecture/              # spec 복사
-│   ├── telayd-protocol.md     # spec v0.2.2 (telayd-planning에서 복사)
-│   └── licensing-audit.md
-├── meetings/
-│   └── 20260506-telayd-l0-kickoff/
-│       ├── summary.md
-│       ├── decisions.md
-│       ├── meeting-notes.md
-│       └── tech-research.md
 ├── .jarfis-project/
 │   ├── project-profile.md     # 이 파일
 │   ├── project-rule.md
@@ -108,6 +100,22 @@ telayd/
 ```
 
 L0에서 **만들지 않는 패키지** (L1+ 진입 시): `desktop/` (Tauri), `ui-shared/`, `protocol-types/`, `apps/mobile-rn/`.
+
+## 별도 위치 SSOT (telayd repo 안에 두지 않음)
+
+JARFIS sub-agent가 컨텍스트 inject 받을 때 다음 경로 reference (모두 absolute):
+
+| 자료 | 위치 | 용도 |
+|---|---|---|
+| Planning SSOT root | `~/AI-OVERALL/telayd-org/planning/` | 모든 기획 산출물 + INDEX/CLAUDE |
+| Architecture spec | `~/AI-OVERALL/telayd-org/planning/architecture/{telayd-protocol,licensing-audit}.md` | spec v0.2.x + 라이선스 audit |
+| Scope spec (L0/L1/L2) | `~/AI-OVERALL/telayd-org/planning/mvp-scope/scope.md` | v0.2.3, 21 acceptance criteria + module dep graph |
+| Decisions (ADR) | `~/AI-OVERALL/telayd-org/planning/decisions/{README, 001-008}.md` | 8 ADR sequential, 결정 history |
+| Brainstorms | `~/AI-OVERALL/telayd-org/planning/brainstorms/b-{1..N}.md` | append-only 사고 흐름 |
+| Research | `~/AI-OVERALL/telayd-org/planning/research/competitive-landscape.md` | 5 카테고리 시장조사 |
+| Narrative (글감) | `~/AI-OVERALL/telayd-org/planning/narrative/{README, 01-06}.md` | LinkedIn / landing copy 자료 |
+| **JARFIS meetings** | `~/repos/jarfis/.personal/orgs/Telayd/meetings/{YYYYMMDD}-<name>/` | work-meeting.md spec align ($JARFIS_ORG_DIR/meetings/) |
+| Spike code | `~/AI-OVERALL/telayd-org/planning/prototypes/{NN-name}/` | throwaway 검증 코드 archive |
 
 ## Scripts & Commands
 

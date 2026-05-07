@@ -1,0 +1,3 @@
+# Clippy configuration for telayd
+# Enforces: cargo clippy --workspace --all-targets -- -D warnings
+msrv = "1.80"

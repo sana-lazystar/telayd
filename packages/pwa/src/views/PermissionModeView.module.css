@@ -1,0 +1,104 @@
+/**
+ * PermissionModeView styles
+ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  padding: 0;
+}
+
+.header {
+  padding: var(--space-6) var(--space-4) var(--space-4);
+  border-bottom: 1px solid var(--color-border-muted);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+}
+
+.subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.content {
+  flex: 1;
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+.errorBanner {
+  margin: 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background-color: rgba(248, 81, 73, 0.15);
+  border: 1px solid var(--color-status-error);
+  border-radius: var(--radius-md);
+  color: var(--color-text-danger);
+  font-size: var(--font-size-sm);
+}
+
+.successBanner {
+  margin: 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background-color: #3fb95033;
+  border: 1px solid var(--color-status-connected);
+  border-radius: var(--radius-md);
+  color: var(--color-text-success);
+  font-size: var(--font-size-sm);
+}
+
+.footer {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-top: 1px solid var(--color-border-default);
+  background-color: var(--color-bg-base);
+}
+
+.cancelButton {
+  flex: 1;
+  min-height: var(--touch-target-min);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-btn-secondary-bg);
+  border: 1px solid var(--color-btn-secondary-border);
+  border-radius: var(--radius-md);
+  color: var(--color-btn-secondary-text);
+  font-size: var(--font-size-base);
+  cursor: pointer;
+  transition: background-color var(--duration-fast);
+}
+
+.cancelButton:hover:not(:disabled) {
+  background-color: var(--color-btn-secondary-hover);
+}
+
+.applyButton {
+  flex: 2;
+  min-height: var(--touch-target-min);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-btn-primary-bg);
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--color-btn-primary-text);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background-color var(--duration-fast);
+}
+
+.applyButton:hover:not(:disabled) {
+  background-color: var(--color-btn-primary-hover);
+}
+
+.applyButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
