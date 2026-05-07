@@ -4,7 +4,7 @@
  * Touch target >= 44px, font >= 14px
  */
 
-@import './tokens.css';
+@import "./tokens.css";
 
 /* Box sizing reset */
 *,
@@ -42,7 +42,12 @@ body {
 }
 
 /* Typography */
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-weight: var(--font-weight-semibold);
   line-height: var(--line-height-tight);
   color: var(--color-text-primary);

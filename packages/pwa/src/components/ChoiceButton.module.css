@@ -17,10 +17,8 @@
   color: var(--color-text-primary);
   text-align: left;
   cursor: pointer;
-  transition:
-    background-color var(--duration-fast) var(--easing-default),
-    border-color var(--duration-fast) var(--easing-default),
-    transform var(--duration-fast) var(--easing-default);
+  transition: background-color var(--duration-fast) var(--easing-default), border-color
+    var(--duration-fast) var(--easing-default), transform var(--duration-fast) var(--easing-default);
   position: relative;
   overflow: hidden;
 }
